@@ -1,0 +1,31 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git clone *)",
+      "WebFetch(domain:skills.sh)",
+      "Bash(npx skills *)",
+      "Bash(rustc --version)",
+      "Bash(npm --version)",
+      "Bash(cargo --version)",
+      "Bash(cargo search *)",
+      "Bash(npm create *)",
+      "Read(//private/tmp/**)",
+      "Bash(rm -rf sharecopy-scaffold)",
+      "Bash(npm install *)",
+      "Bash(npx tauri *)",
+      "Bash(cargo add *)",
+      "Bash(curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs)",
+      "Bash(sh -s -- -y)",
+      "Bash(npm run *)",
+      "Bash(bash *)",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(git push *)",
+      "Bash(gh auth *)",
+      "Bash(gh repo *)",
+      "Bash(git pull *)",
+      "Bash(git stash *)",
+      "Bash(GIT_EDITOR=true git rebase --continue)"
+    ]
+  }
+}
