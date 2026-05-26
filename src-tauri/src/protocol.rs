@@ -194,7 +194,7 @@ impl Message {
         }
 
         let _version = buf[4];
-        let msg_type =
+        let _msg_type =
             MessageType::from_u16(u16::from_le_bytes([buf[5], buf[6]])).ok_or_else(|| {
                 crate::error::AppError::Protocol(format!("未知消息类型: {}", u16::from_le_bytes([buf[5], buf[6]])))
             })?;

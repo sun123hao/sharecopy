@@ -1,0 +1,47 @@
+// ── 设备信息 ──────────────────────────
+export interface DiscoveredDevice {
+  device_id: string;
+  device_name: string;
+  hostname: string;
+  platform: string;
+  ip_address: string;
+  tcp_port: number;
+}
+
+// ── 应用配置 ──────────────────────────
+export interface AppConfig {
+  device_name: string;
+  device_id: string;
+  tcp_port: number;
+  save_dir: string;
+  auto_start: boolean;
+  sync_enabled: boolean;
+  auto_accept_files: boolean;
+  poll_interval_active_ms: number;
+  poll_interval_idle_ms: number;
+}
+
+// ── 同步统计 ──────────────────────────
+export interface SyncStats {
+  texts_synced: number;
+  images_synced: number;
+  files_transferred: number;
+}
+
+// ── 传输进度 ──────────────────────────
+export type TransferState = 'pending' | 'transferring' | 'completed' | 'failed';
+
+export interface TransferProgress {
+  file_name: string;
+  progress: number; // 0-100
+  state: TransferState;
+}
+
+// ── 剪贴板历史条目 ────────────────────
+export interface ClipboardEntry {
+  id: string;
+  type: 'text' | 'image';
+  content: string; // 文本内容或图片 base64
+  from_device: string;
+  timestamp: number;
+}

@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { DeviceList } from './components/DeviceList';
 import { Settings } from './components/Settings';
 import { ClipboardHistory } from './components/ClipboardHistory';
+import { TransferProgressPanel } from './components/TransferProgress';
 import { Toaster } from 'react-hot-toast';
 
 type Page = 'devices' | 'settings' | 'history';
@@ -29,6 +30,9 @@ function App() {
         {activePage === 'settings' && <Settings />}
         {activePage === 'history' && <ClipboardHistory />}
       </main>
+
+      {/* 传输进度 */}
+      <TransferProgressPanel />
 
       {/* 底部导航 */}
       <nav className="flex border-t border-slate-800">

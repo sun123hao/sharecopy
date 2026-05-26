@@ -108,8 +108,8 @@ impl NetworkManager {
     }
 
     async fn handle_connection(
-        mut stream: TcpStream,
-        my_device_id: String,
+        stream: TcpStream,
+        _my_device_id: String,
         connections: Arc<DashMap<String, tokio::sync::mpsc::UnboundedSender<Vec<u8>>>>,
         event_tx: mpsc::UnboundedSender<NetworkEvent>,
     ) -> AppResult<()> {
@@ -142,7 +142,7 @@ impl NetworkManager {
                         });
 
                         // 启动写入任务
-                        let (mut read_half, mut write_half) = stream.into_split();
+                        let (read_half, mut write_half) = stream.into_split();
 
                         let write_handle = {
                             let remote_id = remote_device_id.clone();
@@ -243,7 +243,7 @@ impl NetworkManager {
         });
 
         // 后台任务处理读写
-        let (mut read_half, mut write_half) = stream.into_split();
+        let (read_half, mut write_half) = stream.into_split();
         let conns = self.connections.clone();
         let evt = self.event_tx.clone();
         let remote_id = device.device_id.clone();

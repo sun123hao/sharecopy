@@ -6,6 +6,7 @@ use crate::clipboard::{ClipboardContent, ClipboardWatcher};
 use crate::discovery::{DiscoveryEvent, DiscoveryService};
 use crate::network::{NetworkEvent, NetworkManager};
 use crate::protocol::{ClipboardImageChunkPayload, ClipboardImagePayload, ClipboardTextPayload, ImageFormat, Message};
+use crate::transfer::FileTransferManager;
 
 pub const LARGE_IMAGE_THRESHOLD: usize = 10 * 1024 * 1024; // 10MB
 pub const IMAGE_CHUNK_SIZE: usize = 512 * 1024; // 512KB
@@ -69,6 +70,7 @@ pub struct SyncEngine {
     #[allow(dead_code)]
     discovery: Arc<std::sync::Mutex<DiscoveryService>>,
     network: Arc<NetworkManager>,
+    transfer: Arc<FileTransferManager>,
     sync_enabled: Arc<AtomicBool>,
     stats: Arc<parking_lot::Mutex<SyncStats>>,
     image_assemblers: Arc<parking_lot::Mutex<Vec<ImageChunkAssembler>>>,
@@ -80,12 +82,14 @@ impl SyncEngine {
         watcher: Arc<ClipboardWatcher>,
         discovery: DiscoveryService,
         network: Arc<NetworkManager>,
+        transfer: Arc<FileTransferManager>,
     ) -> Self {
         Self {
             device_id,
             watcher,
             discovery: Arc::new(std::sync::Mutex::new(discovery)),
             network,
+            transfer,
             sync_enabled: Arc::new(AtomicBool::new(true)),
             stats: Arc::new(parking_lot::Mutex::new(SyncStats::default())),
             image_assemblers: Arc::new(parking_lot::Mutex::new(Vec::new())),
@@ -190,7 +194,7 @@ impl SyncEngine {
     async fn handle_network_event(&self, event: NetworkEvent) {
         match event {
             NetworkEvent::MessageReceived {
-                from_device_id,
+                from_device_id: _,
                 message,
             } => match message {
                 Message::ClipboardText(payload) => {
@@ -216,6 +220,14 @@ impl SyncEngine {
                         return;
                     }
                     self.handle_image_chunk(payload);
+                }
+                Message::FileTransferReq(payload) => {
+                    self.transfer.handle_file_request(&payload);
+                }
+                Message::FileDataChunk(payload) => {
+                    if let Err(e) = self.transfer.handle_file_chunk(&payload) {
+                        tracing::error!("文件数据块处理失败: {}", e);
+                    }
                 }
                 _ => {}
             },

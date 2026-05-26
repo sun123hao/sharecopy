@@ -1,12 +1,80 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { FolderOpen, ToggleLeft, ToggleRight } from 'lucide-react';
+import { useAppStore } from '../store/useAppStore';
 
 export function Settings() {
-  const [deviceName, setDeviceName] = useState('My MacBook Pro');
-  const [saveDir, setSaveDir] = useState('~/Downloads/ShareCopy');
+  const config = useAppStore((s) => s.config);
+  const syncEnabled = useAppStore((s) => s.syncEnabled);
+  const loadConfig = useAppStore((s) => s.loadConfig);
+  const setSyncEnabled = useAppStore((s) => s.setSyncEnabled);
+  const updateDeviceName = useAppStore((s) => s.updateDeviceName);
+  const updateConfigAction = useAppStore((s) => s.updateConfig);
+
+  // 本地编辑状态
+  const [deviceName, setDeviceName] = useState('');
+  const [saveDir, setSaveDir] = useState('');
   const [autoStart, setAutoStart] = useState(false);
-  const [syncEnabled, setSyncEnabled] = useState(true);
   const [autoAccept, setAutoAccept] = useState(true);
+
+  // 从 store 同步到本地状态
+  useEffect(() => {
+    loadConfig();
+  }, [loadConfig]);
+
+  useEffect(() => {
+    if (config) {
+      setDeviceName(config.device_name);
+      setSaveDir(config.save_dir);
+      setAutoStart(config.auto_start);
+      setAutoAccept(config.auto_accept_files);
+    }
+  }, [config]);
+
+  const handleDeviceNameBlur = () => {
+    if (deviceName && deviceName !== config?.device_name) {
+      updateDeviceName(deviceName);
+    }
+  };
+
+  const handleSaveDirChange = (dir: string) => {
+    setSaveDir(dir);
+    if (config) {
+      const updated = { ...config, save_dir: dir };
+      updateConfigAction(updated);
+    }
+  };
+
+  const handleSelectFolder = async () => {
+    try {
+      const { open } = await import('@tauri-apps/plugin-dialog');
+      const selected = await open({ directory: true, multiple: false });
+      if (selected && typeof selected === 'string') {
+        handleSaveDirChange(selected);
+      }
+    } catch (e) {
+      console.error('选择文件夹失败:', e);
+    }
+  };
+
+  const handleToggleSync = () => {
+    setSyncEnabled(!syncEnabled);
+  };
+
+  const handleToggleAutoStart = () => {
+    const newVal = !autoStart;
+    setAutoStart(newVal);
+    if (config) {
+      updateConfigAction({ ...config, auto_start: newVal });
+    }
+  };
+
+  const handleToggleAutoAccept = () => {
+    const newVal = !autoAccept;
+    setAutoAccept(newVal);
+    if (config) {
+      updateConfigAction({ ...config, auto_accept_files: newVal });
+    }
+  };
 
   return (
     <div className="space-y-5">
@@ -19,6 +87,7 @@ export function Settings() {
           type="text"
           value={deviceName}
           onChange={(e) => setDeviceName(e.target.value)}
+          onBlur={handleDeviceNameBlur}
           className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500 transition-colors"
         />
       </div>
@@ -32,10 +101,13 @@ export function Settings() {
           <input
             type="text"
             value={saveDir}
-            onChange={(e) => setSaveDir(e.target.value)}
+            onChange={(e) => handleSaveDirChange(e.target.value)}
             className="flex-1 bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500 transition-colors"
           />
-          <button className="flex items-center justify-center w-9 h-9 rounded-lg bg-slate-800 hover:bg-slate-700 transition-colors">
+          <button
+            onClick={handleSelectFolder}
+            className="flex items-center justify-center w-9 h-9 rounded-lg bg-slate-800 hover:bg-slate-700 transition-colors"
+          >
             <FolderOpen className="w-4 h-4 text-slate-400" />
           </button>
         </div>
@@ -45,7 +117,7 @@ export function Settings() {
       <div className="space-y-3 pt-2">
         {/* 同步开关 */}
         <button
-          onClick={() => setSyncEnabled(!syncEnabled)}
+          onClick={handleToggleSync}
           className="w-full flex items-center justify-between p-3 rounded-lg bg-slate-900 border border-slate-800"
         >
           <div className="text-left">
@@ -63,7 +135,7 @@ export function Settings() {
 
         {/* 开机自启 */}
         <button
-          onClick={() => setAutoStart(!autoStart)}
+          onClick={handleToggleAutoStart}
           className="w-full flex items-center justify-between p-3 rounded-lg bg-slate-900 border border-slate-800"
         >
           <div className="text-left">
@@ -81,7 +153,7 @@ export function Settings() {
 
         {/* 自动接收 */}
         <button
-          onClick={() => setAutoAccept(!autoAccept)}
+          onClick={handleToggleAutoAccept}
           className="w-full flex items-center justify-between p-3 rounded-lg bg-slate-900 border border-slate-800"
         >
           <div className="text-left">
@@ -98,11 +170,44 @@ export function Settings() {
         </button>
       </div>
 
+      {/* 同步统计 */}
+      <div className="pt-4 border-t border-slate-800">
+        <p className="text-xs text-slate-500 mb-2">同步统计</p>
+        <StatsSection />
+      </div>
+
       {/* 版本信息 */}
       <div className="pt-4 border-t border-slate-800">
         <p className="text-xs text-slate-600">
           ShareCopy v0.1.0 · Tauri + Rust + React
         </p>
+      </div>
+    </div>
+  );
+}
+
+// 同步统计子组件
+function StatsSection() {
+  const stats = useAppStore((s) => s.stats);
+  const refreshStats = useAppStore((s) => s.refreshStats);
+
+  useEffect(() => {
+    refreshStats();
+  }, [refreshStats]);
+
+  return (
+    <div className="grid grid-cols-3 gap-2 text-center">
+      <div className="p-2 rounded bg-slate-900">
+        <p className="text-lg font-semibold text-white">{stats.texts_synced}</p>
+        <p className="text-xs text-slate-500">文本</p>
+      </div>
+      <div className="p-2 rounded bg-slate-900">
+        <p className="text-lg font-semibold text-white">{stats.images_synced}</p>
+        <p className="text-xs text-slate-500">图片</p>
+      </div>
+      <div className="p-2 rounded bg-slate-900">
+        <p className="text-lg font-semibold text-white">{stats.files_transferred}</p>
+        <p className="text-xs text-slate-500">文件</p>
       </div>
     </div>
   );

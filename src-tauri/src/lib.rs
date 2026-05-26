@@ -1,4 +1,6 @@
-use tauri::Manager;
+use std::sync::Arc;
+use tauri::{Emitter, Manager};
+use tokio::sync::mpsc;
 
 mod error;
 mod protocol;
@@ -14,9 +16,94 @@ mod transfer;
 mod config;
 mod tray;
 
+use clipboard::ClipboardWatcher;
+use config::AppConfig;
+use discovery::DiscoveryService;
+use network::{NetworkEvent, NetworkManager};
+use sync::SyncEngine;
+use transfer::FileTransferManager;
+
 pub struct AppState {
-    pub config: std::sync::Arc<tokio::sync::RwLock<config::AppConfig>>,
+    pub sync_engine: Arc<SyncEngine>,
+    pub transfer_manager: Arc<FileTransferManager>,
+    pub network: Arc<NetworkManager>,
+    pub config: Arc<tokio::sync::RwLock<AppConfig>>,
 }
+
+// ── Tauri 命令 ─────────────────────────
+
+#[tauri::command]
+async fn get_devices(_state: tauri::State<'_, AppState>) -> Result<Vec<serde_json::Value>, String> {
+    // 暂时返回空列表，后续通过 event 推送
+    Ok(vec![])
+}
+
+#[tauri::command]
+async fn toggle_sync(state: tauri::State<'_, AppState>) -> Result<bool, String> {
+    Ok(state.sync_engine.toggle_sync())
+}
+
+#[tauri::command]
+async fn update_device_name(
+    state: tauri::State<'_, AppState>,
+    name: String,
+) -> Result<(), String> {
+    let mut config = state.config.write().await;
+    config.device_name = name;
+    config.save().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn get_config(state: tauri::State<'_, AppState>) -> Result<AppConfig, String> {
+    Ok(state.config.read().await.clone())
+}
+
+#[tauri::command]
+async fn update_config(
+    state: tauri::State<'_, AppState>,
+    new_config: AppConfig,
+) -> Result<(), String> {
+    let mut config = state.config.write().await;
+    *config = new_config;
+    config.save().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn get_sync_stats(
+    state: tauri::State<'_, AppState>,
+) -> Result<sync::SyncStats, String> {
+    Ok(state.sync_engine.get_stats())
+}
+
+#[tauri::command]
+async fn send_files(
+    state: tauri::State<'_, AppState>,
+    paths: Vec<String>,
+    target: String,
+) -> Result<(), String> {
+    for path in paths {
+        let p = std::path::PathBuf::from(&path);
+        state
+            .transfer_manager
+            .send_file(&p, &target)
+            .await
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+async fn get_clipboard_history() -> Result<Vec<serde_json::Value>, String> {
+    // MVP 阶段返回空列表
+    Ok(vec![])
+}
+
+#[tauri::command]
+async fn is_sync_enabled(state: tauri::State<'_, AppState>) -> Result<bool, String> {
+    Ok(state.sync_engine.is_sync_enabled())
+}
+
+// ── 应用入口 ──────────────────────────
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -41,11 +128,125 @@ pub fn run() {
             tracing::info!("ShareCopy 启动中...");
 
             // 加载配置
-            let app_config = config::AppConfig::load().unwrap_or_default();
+            let app_config = AppConfig::load().unwrap_or_default();
+            let device_id = app_config.device_id.clone();
+            let device_name = app_config.device_name.clone();
+            let tcp_port = app_config.tcp_port;
+            let save_dir = app_config.save_dir.clone();
+
+            // 获取本机信息
+            let hostname = hostname::get()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .into_owned();
+            let platform = std::env::consts::OS.to_string();
+
+            tracing::info!("设备: {} ({}), 端口: {}", device_name, platform, tcp_port);
+
+            // 创建网络事件通道
+            let (network_event_tx, network_event_rx) =
+                mpsc::unbounded_channel::<NetworkEvent>();
+
+            // 创建网络管理器
+            let network = Arc::new(NetworkManager::new(
+                device_id.clone(),
+                tcp_port,
+                network_event_tx,
+            ));
+
+            // 创建剪贴板后端
+            #[cfg(target_os = "macos")]
+            let clipboard_backend: Box<dyn clipboard::ClipboardBackend> = {
+                Box::new(
+                    clipboard_macos::MacOSClipboardBackend::new()
+                        .expect("无法创建 macOS 剪贴板后端"),
+                )
+            };
+            #[cfg(target_os = "windows")]
+            let clipboard_backend: Box<dyn clipboard::ClipboardBackend> = {
+                Box::new(
+                    clipboard_windows::WindowsClipboardBackend::new()
+                        .expect("无法创建 Windows 剪贴板后端"),
+                )
+            };
+
+            // 创建剪贴板监视器（run() 使用 &self，可安全放入 Arc）
+            let (clipboard_tx, clipboard_rx) = mpsc::unbounded_channel();
+            let watcher = Arc::new(ClipboardWatcher::new(
+                clipboard_backend,
+                clipboard_tx,
+                app_config.poll_interval_active_ms,
+                app_config.poll_interval_idle_ms,
+            ));
+
+            // 创建设备发现服务
+            let mut discovery_service = DiscoveryService::new(
+                device_id.clone(),
+                device_name.clone(),
+                hostname,
+                platform,
+                tcp_port,
+            )
+            .expect("无法创建设备发现服务");
+
+            let discovery_rx = discovery_service.subscribe();
+
+            // 启动设备发现
+            discovery_service.start().expect("无法启动设备发现");
+
+            // 创建文件传输管理器
+            let (progress_tx, mut progress_rx) = mpsc::unbounded_channel();
+            let transfer_manager = Arc::new(FileTransferManager::new(
+                save_dir,
+                network.clone(),
+                progress_tx,
+            ));
+
+            // 创建同步引擎
+            let sync_engine = Arc::new(SyncEngine::new(
+                device_id.clone(),
+                watcher.clone(),
+                discovery_service,
+                network.clone(),
+                transfer_manager.clone(),
+            ));
+
+            // 注入应用状态
             let app_state = AppState {
-                config: std::sync::Arc::new(tokio::sync::RwLock::new(app_config)),
+                sync_engine: sync_engine.clone(),
+                transfer_manager: transfer_manager.clone(),
+                network: network.clone(),
+                config: Arc::new(tokio::sync::RwLock::new(app_config)),
             };
             app.manage(app_state);
+
+            // 启动网络服务器
+            let network_clone = network.clone();
+            tokio::spawn(async move {
+                if let Err(e) = network_clone.start().await {
+                    tracing::error!("网络服务器启动失败: {}", e);
+                }
+            });
+
+            // 启动同步引擎
+            let engine = sync_engine.clone();
+            tokio::spawn(async move {
+                engine.run(clipboard_rx, network_event_rx, discovery_rx).await;
+            });
+
+            // 启动剪贴板监视器
+            let watcher_clone = watcher.clone();
+            tokio::spawn(async move {
+                watcher_clone.run().await;
+            });
+
+            // 转发传输进度事件到前端
+            let app_handle = app.app_handle().clone();
+            tokio::spawn(async move {
+                while let Some(progress) = progress_rx.recv().await {
+                    let _ = app_handle.emit("transfer-progress", &progress);
+                }
+            });
 
             // 构建系统托盘
             tray::create_tray(app)?;
@@ -53,6 +254,17 @@ pub fn run() {
             tracing::info!("ShareCopy 启动完成");
             Ok(())
         })
+        .invoke_handler(tauri::generate_handler![
+            get_devices,
+            toggle_sync,
+            update_device_name,
+            get_config,
+            update_config,
+            get_sync_stats,
+            send_files,
+            get_clipboard_history,
+            is_sync_enabled,
+        ])
         .run(tauri::generate_context!())
         .expect("ShareCopy 启动失败");
 }

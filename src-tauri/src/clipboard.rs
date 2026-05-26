@@ -1,6 +1,5 @@
 use sha2::{Digest, Sha256};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use tokio::sync::mpsc;
 
 use crate::error::AppResult;
@@ -54,11 +53,11 @@ pub struct ClipboardWatcher {
     backend: Box<dyn ClipboardBackend>,
     active_interval_ms: u64,
     idle_interval_ms: u64,
-    last_change_count: u64,
-    last_content_hash: Option<String>,
+    last_change_count: AtomicU64,
+    last_content_hash: parking_lot::Mutex<Option<String>>,
     tx: mpsc::UnboundedSender<ClipboardContent>,
-    paused: Arc<AtomicBool>,
-    idle_counter: u32,
+    paused: AtomicBool,
+    idle_counter: AtomicU32,
 }
 
 impl ClipboardWatcher {
@@ -72,18 +71,19 @@ impl ClipboardWatcher {
             backend,
             active_interval_ms,
             idle_interval_ms,
-            last_change_count: 0,
-            last_content_hash: None,
+            last_change_count: AtomicU64::new(0),
+            last_content_hash: parking_lot::Mutex::new(None),
             tx,
-            paused: Arc::new(AtomicBool::new(false)),
-            idle_counter: 0,
+            paused: AtomicBool::new(false),
+            idle_counter: AtomicU32::new(0),
         }
     }
 
-    /// 启动轮询循环
-    pub async fn run(&mut self) {
+    /// 启动轮询循环（&self，内部使用原子变量和 Mutex 实现可变性）
+    pub async fn run(&self) {
         loop {
-            let interval_ms = if self.idle_counter > 10 {
+            let idle = self.idle_counter.load(Ordering::Relaxed);
+            let interval_ms = if idle > 10 {
                 self.idle_interval_ms
             } else {
                 self.active_interval_ms
@@ -97,8 +97,9 @@ impl ClipboardWatcher {
 
             match self.backend.change_count() {
                 Ok(current_count) => {
-                    if current_count != self.last_change_count {
-                        self.last_change_count = current_count;
+                    let last_count = self.last_change_count.load(Ordering::Relaxed);
+                    if current_count != last_count {
+                        self.last_change_count.store(current_count, Ordering::Relaxed);
 
                         match self.backend.read() {
                             Ok(content) => {
@@ -109,12 +110,13 @@ impl ClipboardWatcher {
                                 let hash = content.content_hash();
                                 let is_new = self
                                     .last_content_hash
+                                    .lock()
                                     .as_ref()
                                     .map_or(true, |h| h != &hash);
 
                                 if is_new {
-                                    self.last_content_hash = Some(hash);
-                                    self.idle_counter = 0;
+                                    *self.last_content_hash.lock() = Some(hash);
+                                    self.idle_counter.store(0, Ordering::Relaxed);
                                     let _ = self.tx.send(content);
                                 }
                             }
@@ -123,7 +125,7 @@ impl ClipboardWatcher {
                             }
                         }
                     } else {
-                        self.idle_counter += 1;
+                        self.idle_counter.fetch_add(1, Ordering::Relaxed);
                     }
                 }
                 Err(e) => {
@@ -147,9 +149,15 @@ impl ClipboardWatcher {
     pub fn write_safely(&self, content: &ClipboardContent) -> AppResult<()> {
         self.pause();
         let result = self.backend.write(content);
+        // 更新内部状态，防止轮询重新检测到刚写入的内容
+        if result.is_ok() {
+            *self.last_content_hash.lock() = Some(content.content_hash());
+            // 尝试更新 change_count，避免因时间窗口导致的 race
+            if let Ok(cc) = self.backend.change_count() {
+                self.last_change_count.store(cc, Ordering::Relaxed);
+            }
+        }
         self.resume();
-        // 注意：last_change_count 和 last_content_hash 通过内部可变性更新
-        // 由于 Rust 1.95+ 禁止 &T→&mut T 转换，这里需要特殊处理
         result
     }
 }
