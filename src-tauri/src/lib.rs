@@ -162,6 +162,7 @@ pub fn run() {
             // 创建网络管理器
             let network = Arc::new(NetworkManager::new(
                 device_id.clone(),
+                device_name.clone(),
                 tcp_port,
                 network_event_tx,
             ));
@@ -234,6 +235,7 @@ pub fn run() {
                 discovery_service,
                 network.clone(),
                 transfer_manager.clone(),
+                app.app_handle().clone(),
             ));
 
             // 注入应用状态

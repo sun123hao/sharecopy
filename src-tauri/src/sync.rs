@@ -1,5 +1,6 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use tauri::{AppHandle, Emitter};
 use tokio::sync::mpsc;
 
 use crate::clipboard::{ClipboardContent, ClipboardWatcher};
@@ -74,6 +75,7 @@ pub struct SyncEngine {
     sync_enabled: Arc<AtomicBool>,
     stats: Arc<parking_lot::Mutex<SyncStats>>,
     image_assemblers: Arc<parking_lot::Mutex<Vec<ImageChunkAssembler>>>,
+    app_handle: AppHandle,
 }
 
 impl SyncEngine {
@@ -83,6 +85,7 @@ impl SyncEngine {
         discovery: DiscoveryService,
         network: Arc<NetworkManager>,
         transfer: Arc<FileTransferManager>,
+        app_handle: AppHandle,
     ) -> Self {
         Self {
             device_id,
@@ -93,6 +96,7 @@ impl SyncEngine {
             sync_enabled: Arc::new(AtomicBool::new(true)),
             stats: Arc::new(parking_lot::Mutex::new(SyncStats::default())),
             image_assemblers: Arc::new(parking_lot::Mutex::new(Vec::new())),
+            app_handle,
         }
     }
 
@@ -125,15 +129,13 @@ impl SyncEngine {
     }
 
     async fn handle_local_clipboard_change(&self, content: ClipboardContent) {
-        match &content {
-            ClipboardContent::Text(_) => {
-                self.stats.lock().texts_synced += 1;
-            }
-            ClipboardContent::Image { .. } => {
-                self.stats.lock().images_synced += 1;
-            }
-            ClipboardContent::None => return,
+        // 仅在有已连接设备时才广播
+        if self.network.connected_count() == 0 {
+            return;
         }
+
+        let is_text = matches!(&content, ClipboardContent::Text(_));
+        let is_image = matches!(&content, ClipboardContent::Image { .. });
 
         let msg = match content {
             ClipboardContent::Text(text) => Message::ClipboardText(ClipboardTextPayload {
@@ -164,9 +166,16 @@ impl SyncEngine {
         };
 
         let _ = self.network.broadcast(&msg);
+        // 广播成功后递增统计
+        if is_text {
+            self.stats.lock().texts_synced += 1;
+        } else if is_image {
+            self.stats.lock().images_synced += 1;
+        }
     }
 
     async fn send_image_in_chunks(&self, width: u32, height: u32, data: &[u8]) {
+        self.stats.lock().images_synced += 1;
         let transfer_id = uuid::Uuid::new_v4().to_string();
         let total_chunks = (data.len() + IMAGE_CHUNK_SIZE - 1) / IMAGE_CHUNK_SIZE;
         let total_chunks = total_chunks.min(u16::MAX as usize) as u16;
@@ -203,6 +212,7 @@ impl SyncEngine {
                     }
                     let content = ClipboardContent::Text(payload.content);
                     let _ = self.watcher.write_safely(&content);
+                    let _ = self.app_handle.emit("clipboard-updated", &serde_json::json!({"type": "text"}));
                 }
                 Message::ClipboardImage(payload) => {
                     if payload.source_device_id == self.device_id {
@@ -214,6 +224,7 @@ impl SyncEngine {
                         data: payload.data,
                     };
                     let _ = self.watcher.write_safely(&content);
+                    let _ = self.app_handle.emit("clipboard-updated", &serde_json::json!({"type": "image"}));
                 }
                 Message::ClipboardImageChunk(payload) => {
                     if payload.source_device_id == self.device_id {
@@ -231,11 +242,17 @@ impl SyncEngine {
                 }
                 _ => {}
             },
-            NetworkEvent::DeviceConnected { device_id } => {
-                tracing::info!("设备已连接: {}", device_id);
+            NetworkEvent::DeviceConnected { device_name, device_id, platform } => {
+                tracing::info!("设备已连接: {} ({})", device_name, device_id);
+                let _ = self.app_handle.emit("device-online", &serde_json::json!({
+                    "device_id": device_id,
+                    "device_name": device_name,
+                    "platform": platform,
+                }));
             }
             NetworkEvent::DeviceDisconnected { device_id } => {
                 tracing::info!("设备已断开: {}", device_id);
+                let _ = self.app_handle.emit("device-offline", &device_id);
             }
         }
     }
@@ -267,6 +284,7 @@ impl SyncEngine {
                 };
 
                 let _ = self.watcher.write_safely(&clipboard_content);
+                let _ = self.app_handle.emit("clipboard-updated", &serde_json::json!({"type": "image"}));
 
                 // 移除组装器
                 assemblers.retain(|a| a.transfer_id != transfer_id);
@@ -284,6 +302,7 @@ impl SyncEngine {
             if assembler.is_complete() {
                 let content = assembler.assemble();
                 let _ = self.watcher.write_safely(&content);
+                let _ = self.app_handle.emit("clipboard-updated", &serde_json::json!({"type": "image"}));
             } else {
                 assemblers.push(assembler);
             }

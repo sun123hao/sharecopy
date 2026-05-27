@@ -1,13 +1,14 @@
 use dashmap::DashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::time::Instant;
 use tokio::io::AsyncWriteExt;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc;
 
 use crate::discovery::DiscoveredDevice;
 use crate::error::{AppError, AppResult};
-use crate::protocol::{FrameDecoder, Message};
+use crate::protocol::{FrameDecoder, HeartbeatPayload, Message};
 
 // ── 心跳常量 ──────────────────────────────
 pub const HEARTBEAT_INTERVAL_SECS: u64 = 10;
@@ -21,7 +22,9 @@ pub enum NetworkEvent {
         message: Message,
     },
     DeviceConnected {
+        device_name: String,
         device_id: String,
+        platform: String,
     },
     DeviceDisconnected {
         device_id: String,
@@ -31,8 +34,10 @@ pub enum NetworkEvent {
 // ── 网络管理器 ──────────────────────────────
 pub struct NetworkManager {
     device_id: String,
+    device_name: String,
     port: u16,
     connections: Arc<DashMap<String, tokio::sync::mpsc::UnboundedSender<Vec<u8>>>>,
+    last_activity: Arc<DashMap<String, Instant>>,
     event_tx: mpsc::UnboundedSender<NetworkEvent>,
     running: Arc<AtomicBool>,
     discovery_devices: Arc<DashMap<String, DiscoveredDevice>>,
@@ -41,13 +46,16 @@ pub struct NetworkManager {
 impl NetworkManager {
     pub fn new(
         device_id: String,
+        device_name: String,
         port: u16,
         event_tx: mpsc::UnboundedSender<NetworkEvent>,
     ) -> Self {
         Self {
             device_id,
+            device_name,
             port,
             connections: Arc::new(DashMap::new()),
+            last_activity: Arc::new(DashMap::new()),
             event_tx,
             running: Arc::new(AtomicBool::new(true)),
             discovery_devices: Arc::new(DashMap::new()),
@@ -76,7 +84,52 @@ impl NetworkManager {
         let connections = self.connections.clone();
         let event_tx = self.event_tx.clone();
         let device_id = self.device_id.clone();
+        let last_activity = self.last_activity.clone();
         let running = self.running.clone();
+
+        // 心跳 Ping 发送任务
+        let hb_conns = self.connections.clone();
+        let hb_device_id = self.device_id.clone();
+        let hb_running = self.running.clone();
+        tokio::spawn(async move {
+            while hb_running.load(Ordering::Relaxed) {
+                tokio::time::sleep(tokio::time::Duration::from_secs(HEARTBEAT_INTERVAL_SECS)).await;
+                let ping = Message::HeartbeatPing(HeartbeatPayload {
+                    device_id: hb_device_id.clone(),
+                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                });
+                let Ok(encoded) = ping.encode() else { continue };
+                for entry in hb_conns.iter() {
+                    let _ = entry.value().send(encoded.clone());
+                }
+            }
+        });
+
+        // 心跳超时检测任务
+        let timeout_conns = self.connections.clone();
+        let timeout_activity = self.last_activity.clone();
+        let timeout_event = self.event_tx.clone();
+        let timeout_running = self.running.clone();
+        tokio::spawn(async move {
+            while timeout_running.load(Ordering::Relaxed) {
+                tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
+                let now = Instant::now();
+                let timeout = std::time::Duration::from_secs(HEARTBEAT_TIMEOUT_SECS);
+                let timed_out: Vec<String> = timeout_activity
+                    .iter()
+                    .filter(|e| now - *e.value() > timeout)
+                    .map(|e| e.key().clone())
+                    .collect();
+                for id in timed_out {
+                    tracing::warn!("设备心跳超时，断开: {}", id);
+                    timeout_conns.remove(&id);
+                    timeout_activity.remove(&id);
+                    let _ = timeout_event.send(NetworkEvent::DeviceDisconnected {
+                        device_id: id,
+                    });
+                }
+            }
+        });
 
         tokio::spawn(async move {
             while running.load(Ordering::Relaxed) {
@@ -86,10 +139,11 @@ impl NetworkManager {
                         let conns = connections.clone();
                         let evt = event_tx.clone();
                         let did = device_id.clone();
+                        let act = last_activity.clone();
 
                         tokio::spawn(async move {
                             if let Err(e) =
-                                Self::handle_connection(stream, did, conns, evt).await
+                                Self::handle_connection(stream, did, conns, evt, act).await
                             {
                                 tracing::error!("连接处理错误: {}", e);
                             }
@@ -112,6 +166,7 @@ impl NetworkManager {
         _my_device_id: String,
         connections: Arc<DashMap<String, tokio::sync::mpsc::UnboundedSender<Vec<u8>>>>,
         event_tx: mpsc::UnboundedSender<NetworkEvent>,
+        last_activity: Arc<DashMap<String, Instant>>,
     ) -> AppResult<()> {
         // 等待握手消息
         let mut decoder = FrameDecoder::new();
@@ -123,22 +178,26 @@ impl NetworkManager {
                 Ok(0) => return Err(AppError::Protocol("连接关闭".into())),
                 Ok(n) => {
                     let messages = decoder.feed(&buf[..n]);
-                    if let Some(remote_device_id) = messages.iter().find_map(|m| {
+                    if let Some(device_info) = messages.iter().find_map(|m| {
                         if let Message::DeviceInfo(payload) = m {
-                            Some(payload.device_id.clone())
+                            Some((payload.device_id.clone(), payload.device_name.clone(), payload.platform.clone()))
                         } else {
                             None
                         }
                     }) {
-                        tracing::info!("设备握手完成: {}", remote_device_id);
+                        let (remote_device_id, remote_device_name, remote_platform) = device_info;
+                        tracing::info!("设备握手完成: {} ({})", remote_device_name, remote_device_id);
 
                         let (send_tx, mut send_rx) =
                             tokio::sync::mpsc::unbounded_channel::<Vec<u8>>();
 
                         connections.insert(remote_device_id.clone(), send_tx);
+                        last_activity.insert(remote_device_id.clone(), Instant::now());
 
                         let _ = event_tx.send(NetworkEvent::DeviceConnected {
+                            device_name: remote_device_name,
                             device_id: remote_device_id.clone(),
+                            platform: remote_platform,
                         });
 
                         // 启动写入任务
@@ -159,6 +218,10 @@ impl NetworkManager {
                         // 读取循环
                         let mut decoder2 = FrameDecoder::new();
                         let mut buf2 = vec![0u8; 65536];
+                        let act = last_activity.clone();
+                        let send_for_pong = connections.clone();
+                        let remote_rid = remote_device_id.clone();
+                        let my_id = _my_device_id.clone();
 
                         loop {
                             match read_half.try_read(&mut buf2) {
@@ -166,6 +229,25 @@ impl NetworkManager {
                                 Ok(n) => {
                                     let msgs = decoder2.feed(&buf2[..n]);
                                     for msg in msgs {
+                                        match &msg {
+                                            Message::HeartbeatPing(_) | Message::HeartbeatPong(_) => {
+                                                act.insert(remote_rid.clone(), Instant::now());
+                                            }
+                                            _ => {}
+                                        }
+                                        // 收到 Ping 自动回复 Pong
+                                        if matches!(&msg, Message::HeartbeatPing(_)) {
+                                            let pong = Message::HeartbeatPong(HeartbeatPayload {
+                                                device_id: my_id.clone(),
+                                                timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                                            });
+                                            if let Ok(encoded) = pong.encode() {
+                                                if let Some(tx) = send_for_pong.get(&remote_rid) {
+                                                    let _ = tx.send(encoded);
+                                                }
+                                            }
+                                            continue; // Ping 不需要转发到 SyncEngine
+                                        }
                                         let _ = event_tx.send(NetworkEvent::MessageReceived {
                                             from_device_id: remote_device_id.clone(),
                                             message: msg,
@@ -183,6 +265,7 @@ impl NetworkManager {
 
                         // 断开
                         connections.remove(&remote_device_id);
+                        last_activity.remove(&remote_device_id);
                         let _ = event_tx.send(NetworkEvent::DeviceDisconnected {
                             device_id: remote_device_id.clone(),
                         });
@@ -220,7 +303,7 @@ impl NetworkManager {
         // 发送握手消息
         let handshake = Message::DeviceInfo(crate::protocol::DeviceInfoPayload {
             device_id: self.device_id.clone(),
-            device_name: String::new(),
+            device_name: self.device_name.clone(),
             hostname: hostname::get()
                 .unwrap_or_default()
                 .to_string_lossy()
@@ -237,9 +320,12 @@ impl NetworkManager {
 
         self.connections
             .insert(device.device_id.clone(), send_tx);
+        self.last_activity.insert(device.device_id.clone(), Instant::now());
 
         let _ = self.event_tx.send(NetworkEvent::DeviceConnected {
+            device_name: device.device_name.clone(),
             device_id: device.device_id.clone(),
+            platform: device.platform.clone(),
         });
 
         // 后台任务处理读写
@@ -247,6 +333,8 @@ impl NetworkManager {
         let conns = self.connections.clone();
         let evt = self.event_tx.clone();
         let remote_id = device.device_id.clone();
+        let act = self.last_activity.clone();
+        let my_id = self.device_id.clone();
 
         tokio::spawn(async move {
             // 写入任务
@@ -266,6 +354,24 @@ impl NetworkManager {
                     Ok(0) => break,
                     Ok(n) => {
                         for msg in decoder.feed(&buf[..n]) {
+                            match &msg {
+                                Message::HeartbeatPing(_) | Message::HeartbeatPong(_) => {
+                                    act.insert(remote_id.clone(), Instant::now());
+                                }
+                                _ => {}
+                            }
+                            if matches!(&msg, Message::HeartbeatPing(_)) {
+                                let pong = Message::HeartbeatPong(HeartbeatPayload {
+                                    device_id: my_id.clone(),
+                                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                                });
+                                if let Ok(encoded) = pong.encode() {
+                                    if let Some(tx) = conns.get(&remote_id) {
+                                        let _ = tx.send(encoded);
+                                    }
+                                }
+                                continue;
+                            }
                             let _ = evt.send(NetworkEvent::MessageReceived {
                                 from_device_id: remote_id.clone(),
                                 message: msg,
@@ -282,6 +388,7 @@ impl NetworkManager {
 
             write_task.abort();
             conns.remove(&remote_id);
+            act.remove(&remote_id);
             let _ = evt.send(NetworkEvent::DeviceDisconnected {
                 device_id: remote_id,
             });

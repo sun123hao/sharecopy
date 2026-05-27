@@ -1,5 +1,7 @@
 use arboard::Clipboard;
 use arboard::ImageData;
+use objc2::msg_send;
+use objc2::class;
 
 use crate::clipboard::{ClipboardBackend, ClipboardContent};
 use crate::error::{AppError, AppResult};
@@ -91,23 +93,12 @@ impl ClipboardBackend for MacOSClipboardBackend {
         Ok(())
     }
 
+    /// 直接读取系统 NSPasteboard.changeCount，精确检测每次剪贴板变更
     fn change_count(&self) -> AppResult<u64> {
-        // 使用内容哈希检测变化
-        let mut clipboard = Clipboard::new()
-            .map_err(|e| AppError::Clipboard(format!("无法打开剪贴板: {}", e)))?;
-
-        let timestamp = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis() as u64;
-
-        if let Ok(text) = clipboard.get_text() {
-            use std::hash::{Hash, Hasher};
-            let mut hasher = std::collections::hash_map::DefaultHasher::new();
-            text.hash(&mut hasher);
-            return Ok(hasher.finish());
+        unsafe {
+            let pasteboard: *const objc2::runtime::AnyObject = msg_send![class!(NSPasteboard), generalPasteboard];
+            let count: objc2::ffi::NSInteger = msg_send![pasteboard, changeCount];
+            Ok(count as u64)
         }
-
-        Ok(timestamp)
     }
 }
