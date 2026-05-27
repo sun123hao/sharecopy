@@ -1,5 +1,7 @@
 use std::sync::Arc;
-use tauri::{Emitter, Manager, RunEvent};
+use tauri::{Emitter, Manager};
+#[cfg(target_os = "macos")]
+use tauri::RunEvent;
 use tokio::sync::mpsc;
 
 mod error;
@@ -303,11 +305,13 @@ pub fn run() {
         .expect("ShareCopy 启动失败")
         .run(|app_handle, event| {
             // macOS: 点击 Dock 图标时恢复主窗口
+            #[cfg(target_os = "macos")]
             if let RunEvent::Reopen { .. } = event {
                 if let Some(window) = app_handle.get_webview_window("main") {
                     let _ = window.show();
                     let _ = window.set_focus();
                 }
             }
+            let _ = event;
         });
 }
