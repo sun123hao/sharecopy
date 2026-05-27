@@ -1,6 +1,23 @@
 import { useEffect, useState } from 'react';
-import { FolderOpen, ToggleLeft, ToggleRight } from 'lucide-react';
+import { FolderOpen } from 'lucide-react';
 import { useAppStore } from '../store/useAppStore';
+
+function Toggle({ checked, onChange }: { checked: boolean; onChange: () => void }) {
+  return (
+    <button
+      onClick={onChange}
+      className={`relative w-10 h-6 rounded-full transition-colors cursor-pointer ${
+        checked ? 'bg-amber-500' : 'bg-slate-300'
+      }`}
+    >
+      <div
+        className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${
+          checked ? 'translate-x-[18px]' : 'translate-x-0.5'
+        }`}
+      />
+    </button>
+  );
+}
 
 export function Settings() {
   const config = useAppStore((s) => s.config);
@@ -10,13 +27,11 @@ export function Settings() {
   const updateDeviceName = useAppStore((s) => s.updateDeviceName);
   const updateConfigAction = useAppStore((s) => s.updateConfig);
 
-  // 本地编辑状态
   const [deviceName, setDeviceName] = useState('');
   const [saveDir, setSaveDir] = useState('');
   const [autoStart, setAutoStart] = useState(false);
   const [autoAccept, setAutoAccept] = useState(true);
 
-  // 从 store 同步到本地状态
   useEffect(() => {
     loadConfig();
   }, [loadConfig]);
@@ -39,8 +54,7 @@ export function Settings() {
   const handleSaveDirChange = (dir: string) => {
     setSaveDir(dir);
     if (config) {
-      const updated = { ...config, save_dir: dir };
-      updateConfigAction(updated);
+      updateConfigAction({ ...config, save_dir: dir });
     }
   };
 
@@ -54,10 +68,6 @@ export function Settings() {
     } catch (e) {
       console.error('选择文件夹失败:', e);
     }
-  };
-
-  const handleToggleSync = () => {
-    setSyncEnabled(!syncEnabled);
   };
 
   const handleToggleAutoStart = () => {
@@ -78,35 +88,36 @@ export function Settings() {
 
   return (
     <div className="space-y-5">
-      <h2 className="text-sm font-medium text-slate-400 mb-4">设置</h2>
+      <div className="flex items-center gap-2 mb-4">
+        <div className="w-1 h-4 rounded-full bg-amber-500" />
+        <h2 className="text-sm font-semibold text-slate-700">设置</h2>
+      </div>
 
-      {/* 设备别名 */}
+      {/* 设备名称 */}
       <div>
-        <label className="text-xs text-slate-500 mb-1.5 block">设备名称</label>
+        <label className="text-[11px] text-slate-500 mb-1.5 block">设备名称</label>
         <input
           type="text"
           value={deviceName}
           onChange={(e) => setDeviceName(e.target.value)}
           onBlur={handleDeviceNameBlur}
-          className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500 transition-colors"
+          className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2.5 text-sm text-slate-800 focus:outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-50 transition-all"
         />
       </div>
 
       {/* 文件保存路径 */}
       <div>
-        <label className="text-xs text-slate-500 mb-1.5 block">
-          文件保存路径
-        </label>
+        <label className="text-[11px] text-slate-500 mb-1.5 block">文件保存路径</label>
         <div className="flex gap-2">
           <input
             type="text"
             value={saveDir}
             onChange={(e) => handleSaveDirChange(e.target.value)}
-            className="flex-1 bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500 transition-colors"
+            className="flex-1 bg-white border border-slate-200 rounded-xl px-3 py-2.5 text-sm text-slate-800 focus:outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-50 transition-all"
           />
           <button
             onClick={handleSelectFolder}
-            className="flex items-center justify-center w-9 h-9 rounded-lg bg-slate-800 hover:bg-slate-700 transition-colors"
+            className="flex items-center justify-center w-10 h-10 rounded-xl bg-white border border-slate-200 hover:bg-slate-50 transition-colors"
           >
             <FolderOpen className="w-4 h-4 text-slate-400" />
           </button>
@@ -114,71 +125,59 @@ export function Settings() {
       </div>
 
       {/* 开关项 */}
-      <div className="space-y-3 pt-2">
+      <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
         {/* 同步开关 */}
         <button
-          onClick={handleToggleSync}
-          className="w-full flex items-center justify-between p-3 rounded-lg bg-slate-900 border border-slate-800"
+          onClick={() => setSyncEnabled(!syncEnabled)}
+          className="w-full flex items-center justify-between p-3.5 hover:bg-slate-50 transition-colors border-b border-slate-100"
         >
           <div className="text-left">
-            <p className="text-sm text-white">剪贴板同步</p>
-            <p className="text-xs text-slate-500 mt-0.5">
+            <p className="text-sm font-medium text-slate-800">剪贴板同步</p>
+            <p className="text-[11px] text-slate-400 mt-0.5">
               自动同步文本和图片到其他设备
             </p>
           </div>
-          {syncEnabled ? (
-            <ToggleRight className="w-6 h-6 text-blue-400" />
-          ) : (
-            <ToggleLeft className="w-6 h-6 text-slate-600" />
-          )}
+          <Toggle checked={syncEnabled} onChange={() => setSyncEnabled(!syncEnabled)} />
         </button>
 
         {/* 开机自启 */}
         <button
           onClick={handleToggleAutoStart}
-          className="w-full flex items-center justify-between p-3 rounded-lg bg-slate-900 border border-slate-800"
+          className="w-full flex items-center justify-between p-3.5 hover:bg-slate-50 transition-colors border-b border-slate-100"
         >
           <div className="text-left">
-            <p className="text-sm text-white">开机自启</p>
-            <p className="text-xs text-slate-500 mt-0.5">
+            <p className="text-sm font-medium text-slate-800">开机自启</p>
+            <p className="text-[11px] text-slate-400 mt-0.5">
               登录系统时自动启动 ShareCopy
             </p>
           </div>
-          {autoStart ? (
-            <ToggleRight className="w-6 h-6 text-blue-400" />
-          ) : (
-            <ToggleLeft className="w-6 h-6 text-slate-600" />
-          )}
+          <Toggle checked={autoStart} onChange={handleToggleAutoStart} />
         </button>
 
         {/* 自动接收 */}
         <button
           onClick={handleToggleAutoAccept}
-          className="w-full flex items-center justify-between p-3 rounded-lg bg-slate-900 border border-slate-800"
+          className="w-full flex items-center justify-between p-3.5 hover:bg-slate-50 transition-colors"
         >
           <div className="text-left">
-            <p className="text-sm text-white">自动接收文件</p>
-            <p className="text-xs text-slate-500 mt-0.5">
+            <p className="text-sm font-medium text-slate-800">自动接收文件</p>
+            <p className="text-[11px] text-slate-400 mt-0.5">
               无需确认直接保存接收的文件
             </p>
           </div>
-          {autoAccept ? (
-            <ToggleRight className="w-6 h-6 text-blue-400" />
-          ) : (
-            <ToggleLeft className="w-6 h-6 text-slate-600" />
-          )}
+          <Toggle checked={autoAccept} onChange={handleToggleAutoAccept} />
         </button>
       </div>
 
       {/* 同步统计 */}
-      <div className="pt-4 border-t border-slate-800">
-        <p className="text-xs text-slate-500 mb-2">同步统计</p>
+      <div className="pt-4 border-t border-slate-200">
+        <p className="text-[11px] text-slate-500 mb-2">同步统计</p>
         <StatsSection />
       </div>
 
       {/* 版本信息 */}
-      <div className="pt-4 border-t border-slate-800">
-        <p className="text-xs text-slate-600">
+      <div className="pt-4 border-t border-slate-200">
+        <p className="text-[11px] text-slate-400">
           ShareCopy v0.1.0 · Tauri + Rust + React
         </p>
       </div>
@@ -197,17 +196,17 @@ function StatsSection() {
 
   return (
     <div className="grid grid-cols-3 gap-2 text-center">
-      <div className="p-2 rounded bg-slate-900">
-        <p className="text-lg font-semibold text-white">{stats.texts_synced}</p>
-        <p className="text-xs text-slate-500">文本</p>
+      <div className="p-3 rounded-xl bg-white border border-slate-200">
+        <p className="text-lg font-bold text-slate-800">{stats.texts_synced}</p>
+        <p className="text-[10px] text-slate-400 mt-0.5">文本</p>
       </div>
-      <div className="p-2 rounded bg-slate-900">
-        <p className="text-lg font-semibold text-white">{stats.images_synced}</p>
-        <p className="text-xs text-slate-500">图片</p>
+      <div className="p-3 rounded-xl bg-white border border-slate-200">
+        <p className="text-lg font-bold text-slate-800">{stats.images_synced}</p>
+        <p className="text-[10px] text-slate-400 mt-0.5">图片</p>
       </div>
-      <div className="p-2 rounded bg-slate-900">
-        <p className="text-lg font-semibold text-white">{stats.files_transferred}</p>
-        <p className="text-xs text-slate-500">文件</p>
+      <div className="p-3 rounded-xl bg-white border border-slate-200">
+        <p className="text-lg font-bold text-slate-800">{stats.files_transferred}</p>
+        <p className="text-[10px] text-slate-400 mt-0.5">文件</p>
       </div>
     </div>
   );

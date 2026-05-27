@@ -1,6 +1,6 @@
+import { File, CheckCircle2, XCircle } from 'lucide-react';
 import { useAppStore } from '../store/useAppStore';
 import { useTransferProgress } from '../hooks/useTauriEvents';
-import { File } from 'lucide-react';
 
 export function TransferProgressPanel() {
   const transfers = useAppStore((s) => s.transfers);
@@ -17,29 +17,35 @@ export function TransferProgressPanel() {
   if (transfers.length === 0) return null;
 
   return (
-    <div className="border-t border-slate-800 px-4 py-3 space-y-2">
-      <p className="text-xs font-medium text-slate-400">传输进度</p>
+    <div className="bg-white border-t border-slate-200 px-4 py-3 space-y-2">
+      <p className="text-[11px] font-medium text-slate-500">传输进度</p>
       {transfers.slice(-3).map((t) => (
         <div
           key={t.file_name}
-          className="flex items-center gap-3 p-2 rounded bg-slate-900/50"
+          className="flex items-center gap-3 p-2.5 rounded-xl bg-slate-50 border border-slate-100"
         >
-          <File className="w-4 h-4 text-slate-400 flex-shrink-0" />
+          {t.state === 'completed' ? (
+            <CheckCircle2 className="w-4 h-4 text-emerald-400 flex-shrink-0" />
+          ) : t.state === 'failed' ? (
+            <XCircle className="w-4 h-4 text-red-400 flex-shrink-0" />
+          ) : (
+            <File className="w-4 h-4 text-amber-400 flex-shrink-0" />
+          )}
           <div className="flex-1 min-w-0">
-            <p className="text-xs text-white truncate">{t.file_name}</p>
-            <div className="mt-1 h-1 rounded-full bg-slate-700 overflow-hidden">
+            <p className="text-xs text-slate-700 truncate">{t.file_name}</p>
+            <div className="mt-1.5 h-1 rounded-full bg-slate-200 overflow-hidden">
               <div
                 className={`h-full rounded-full transition-all duration-300 ${
-                  t.state === 'failed' ? 'bg-red-500' : 'bg-blue-500'
+                  t.state === 'failed' ? 'bg-red-400' : 'bg-amber-500'
                 }`}
                 style={{ width: `${t.progress}%` }}
               />
             </div>
           </div>
           <span
-            className={`text-xs ${
+            className={`text-[10px] font-medium ${
               t.state === 'completed'
-                ? 'text-green-400'
+                ? 'text-emerald-500'
                 : t.state === 'failed'
                   ? 'text-red-400'
                   : 'text-slate-400'

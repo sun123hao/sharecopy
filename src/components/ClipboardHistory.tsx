@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { FileText } from 'lucide-react';
+import { ClipboardList, FileText, Image as ImageIcon, File } from 'lucide-react';
 import { useAppStore } from '../store/useAppStore';
 import { useClipboardUpdated } from '../hooks/useTauriEvents';
 
@@ -11,36 +11,51 @@ export function ClipboardHistory() {
     refreshStats();
   }, [refreshStats]);
 
-  // 监听剪贴板更新事件
-  useClipboardUpdated((_entry) => {
+  useClipboardUpdated(() => {
     refreshStats();
   });
 
-  const hasActivity = stats.texts_synced > 0 || stats.images_synced > 0;
+  const hasActivity = stats.texts_synced > 0 || stats.images_synced > 0 || stats.files_transferred > 0;
 
   return (
     <div>
-      <h2 className="text-sm font-medium text-slate-400 mb-4">剪贴板历史</h2>
+      <div className="flex items-center gap-2 mb-4">
+        <div className="w-1 h-4 rounded-full bg-amber-500" />
+        <h2 className="text-sm font-semibold text-slate-700">剪贴板历史</h2>
+      </div>
+
       {!hasActivity ? (
-        <div className="text-center py-12">
-          <p className="text-slate-500">暂无同步记录</p>
-          <p className="text-xs text-slate-600 mt-2">
+        <div className="text-center py-14">
+          <div className="w-16 h-16 mx-auto mb-4 rounded-2xl bg-slate-100 flex items-center justify-center">
+            <ClipboardList className="w-7 h-7 text-slate-300" />
+          </div>
+          <p className="text-sm text-slate-500">暂无同步记录</p>
+          <p className="text-xs text-slate-400 mt-1.5">
             同步过的文本和图片将显示在这里
           </p>
         </div>
       ) : (
         <div className="space-y-3">
-          <div className="flex items-center gap-3 p-3 rounded-lg bg-slate-900 border border-slate-800">
-            <FileText className="w-4 h-4 text-slate-400 flex-shrink-0" />
-            <div className="flex-1 min-w-0">
-              <p className="text-xs text-slate-500">
-                已同步 <span className="text-white font-medium">{stats.texts_synced}</span> 条文本
-                ，<span className="text-white font-medium">{stats.images_synced}</span> 张图片
-                ，<span className="text-white font-medium">{stats.files_transferred}</span> 个文件
-              </p>
+          {/* 统计概览 */}
+          <div className="grid grid-cols-3 gap-2">
+            <div className="p-3 rounded-xl bg-white border border-slate-200 text-center">
+              <FileText className="w-4 h-4 text-amber-400 mx-auto mb-1" />
+              <p className="text-lg font-bold text-slate-800">{stats.texts_synced}</p>
+              <p className="text-[10px] text-slate-400">条文本</p>
+            </div>
+            <div className="p-3 rounded-xl bg-white border border-slate-200 text-center">
+              <ImageIcon className="w-4 h-4 text-blue-400 mx-auto mb-1" />
+              <p className="text-lg font-bold text-slate-800">{stats.images_synced}</p>
+              <p className="text-[10px] text-slate-400">张图片</p>
+            </div>
+            <div className="p-3 rounded-xl bg-white border border-slate-200 text-center">
+              <File className="w-4 h-4 text-emerald-400 mx-auto mb-1" />
+              <p className="text-lg font-bold text-slate-800">{stats.files_transferred}</p>
+              <p className="text-[10px] text-slate-400">个文件</p>
             </div>
           </div>
-          <p className="text-xs text-slate-600 text-center">
+
+          <p className="text-[11px] text-slate-400 text-center pt-2">
             详细历史记录将在后续版本中支持
           </p>
         </div>

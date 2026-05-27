@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use tauri::{Emitter, Manager};
+use tauri::{Emitter, Manager, RunEvent};
 use tokio::sync::mpsc;
 
 mod error;
@@ -135,10 +135,20 @@ pub fn run() {
             let save_dir = app_config.save_dir.clone();
 
             // 获取本机信息
-            let hostname = hostname::get()
-                .unwrap_or_default()
-                .to_string_lossy()
-                .into_owned();
+            let hostname = {
+                let h = hostname::get()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .into_owned();
+                // mdns-sd 要求 hostname 以 ".local." 结尾
+                if h.ends_with(".local.") {
+                    h
+                } else if h.ends_with(".local") {
+                    format!("{}.", h)
+                } else {
+                    format!("{}.local.", h.trim_end_matches('.'))
+                }
+            };
             let platform = std::env::consts::OS.to_string();
 
             tracing::info!("设备: {} ({}), 端口: {}", device_name, platform, tcp_port);
@@ -157,17 +167,23 @@ pub fn run() {
             // 创建剪贴板后端
             #[cfg(target_os = "macos")]
             let clipboard_backend: Box<dyn clipboard::ClipboardBackend> = {
-                Box::new(
-                    clipboard_macos::MacOSClipboardBackend::new()
-                        .expect("无法创建 macOS 剪贴板后端"),
-                )
+                match clipboard_macos::MacOSClipboardBackend::new() {
+                    Ok(b) => Box::new(b),
+                    Err(e) => {
+                        tracing::error!("无法创建 macOS 剪贴板后端: {}", e);
+                        return Err(Box::new(e));
+                    }
+                }
             };
             #[cfg(target_os = "windows")]
             let clipboard_backend: Box<dyn clipboard::ClipboardBackend> = {
-                Box::new(
-                    clipboard_windows::WindowsClipboardBackend::new()
-                        .expect("无法创建 Windows 剪贴板后端"),
-                )
+                match clipboard_windows::WindowsClipboardBackend::new() {
+                    Ok(b) => Box::new(b),
+                    Err(e) => {
+                        tracing::error!("无法创建 Windows 剪贴板后端: {}", e);
+                        return Err(Box::new(e));
+                    }
+                }
             };
 
             // 创建剪贴板监视器（run() 使用 &self，可安全放入 Arc）
@@ -180,19 +196,26 @@ pub fn run() {
             ));
 
             // 创建设备发现服务
-            let mut discovery_service = DiscoveryService::new(
+            let mut discovery_service = match DiscoveryService::new(
                 device_id.clone(),
                 device_name.clone(),
                 hostname,
                 platform,
                 tcp_port,
-            )
-            .expect("无法创建设备发现服务");
+            ) {
+                Ok(s) => s,
+                Err(e) => {
+                    tracing::warn!("无法创建设备发现服务: {}", e);
+                    return Err(Box::new(e));
+                }
+            };
 
             let discovery_rx = discovery_service.subscribe();
 
-            // 启动设备发现
-            discovery_service.start().expect("无法启动设备发现");
+            // 启动设备发现（非致命错误，失败时仅记录日志）
+            if let Err(e) = discovery_service.start() {
+                tracing::warn!("设备发现启动失败（后台功能不可用）: {}", e);
+            }
 
             // 创建文件传输管理器
             let (progress_tx, mut progress_rx) = mpsc::unbounded_channel();
@@ -220,9 +243,20 @@ pub fn run() {
             };
             app.manage(app_state);
 
+            // 拦截窗口关闭事件 —— 关闭按钮改为隐藏到托盘
+            if let Some(window) = app.get_webview_window("main") {
+                let w = window.clone();
+                window.on_window_event(move |event| {
+                    if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                        api.prevent_close();
+                        let _ = w.hide();
+                    }
+                });
+            }
+
             // 启动网络服务器
             let network_clone = network.clone();
-            tokio::spawn(async move {
+            tauri::async_runtime::spawn(async move {
                 if let Err(e) = network_clone.start().await {
                     tracing::error!("网络服务器启动失败: {}", e);
                 }
@@ -230,19 +264,19 @@ pub fn run() {
 
             // 启动同步引擎
             let engine = sync_engine.clone();
-            tokio::spawn(async move {
+            tauri::async_runtime::spawn(async move {
                 engine.run(clipboard_rx, network_event_rx, discovery_rx).await;
             });
 
             // 启动剪贴板监视器
             let watcher_clone = watcher.clone();
-            tokio::spawn(async move {
+            tauri::async_runtime::spawn(async move {
                 watcher_clone.run().await;
             });
 
             // 转发传输进度事件到前端
             let app_handle = app.app_handle().clone();
-            tokio::spawn(async move {
+            tauri::async_runtime::spawn(async move {
                 while let Some(progress) = progress_rx.recv().await {
                     let _ = app_handle.emit("transfer-progress", &progress);
                 }
@@ -265,6 +299,15 @@ pub fn run() {
             get_clipboard_history,
             is_sync_enabled,
         ])
-        .run(tauri::generate_context!())
-        .expect("ShareCopy 启动失败");
+        .build(tauri::generate_context!())
+        .expect("ShareCopy 启动失败")
+        .run(|app_handle, event| {
+            // macOS: 点击 Dock 图标时恢复主窗口
+            if let RunEvent::Reopen { .. } = event {
+                if let Some(window) = app_handle.get_webview_window("main") {
+                    let _ = window.show();
+                    let _ = window.set_focus();
+                }
+            }
+        });
 }

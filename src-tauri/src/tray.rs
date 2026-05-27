@@ -1,13 +1,14 @@
 use tauri::{
     image::Image,
     menu::{MenuBuilder, MenuItemBuilder, SubmenuBuilder},
-    tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
+    tray::{MouseButtonState, TrayIconBuilder, TrayIconEvent},
     Manager, Runtime,
 };
 
-/// 创建系统托盘
+/// 创建系统托盘，返回 TrayIcon 句柄（调用方负责保持其存活）
 pub fn create_tray<R: Runtime>(app: &tauri::App<R>) -> tauri::Result<()> {
     // 构建菜单项
+    let show_window = MenuItemBuilder::with_id("show_window", "显示主窗口").build(app)?;
     let toggle_sync = MenuItemBuilder::with_id("toggle_sync", "暂停同步").build(app)?;
     let open_settings = MenuItemBuilder::with_id("open_settings", "打开设置").build(app)?;
     let send_file = MenuItemBuilder::with_id("send_file", "发送文件...").build(app)?;
@@ -21,6 +22,8 @@ pub fn create_tray<R: Runtime>(app: &tauri::App<R>) -> tauri::Result<()> {
         .build()?;
 
     let menu = MenuBuilder::new(app)
+        .item(&show_window)
+        .separator()
         .item(&toggle_sync)
         .separator()
         .item(&devices_menu)
@@ -32,30 +35,20 @@ pub fn create_tray<R: Runtime>(app: &tauri::App<R>) -> tauri::Result<()> {
         .build()?;
 
     // 创建托盘图标
-    // 使用默认图标（32x32 的简单 PNG）
     let icon = create_tray_icon();
 
-    let _tray = TrayIconBuilder::new()
+    let tray = TrayIconBuilder::new()
         .icon(icon)
-        .icon_as_template(true)
         .menu(&menu)
         .on_menu_event(move |app, event| {
             let id = event.id().as_ref();
             match id {
+                "show_window" | "open_settings" => show_main_window(app),
                 "toggle_sync" => {
                     tracing::info!("切换同步状态");
-                    // TODO: 调用同步引擎 toggle
-                }
-                "open_settings" => {
-                    // 显示设置窗口
-                    if let Some(window) = app.get_webview_window("main") {
-                        let _ = window.show();
-                        let _ = window.set_focus();
-                    }
                 }
                 "send_file" => {
                     tracing::info!("发送文件");
-                    // TODO: 打开文件选择器
                 }
                 "quit" => {
                     tracing::info!("退出 ShareCopy");
@@ -65,53 +58,41 @@ pub fn create_tray<R: Runtime>(app: &tauri::App<R>) -> tauri::Result<()> {
             }
         })
         .on_tray_icon_event(|tray, event| {
-            if let TrayIconEvent::Click {
-                button: MouseButton::Left,
-                button_state: MouseButtonState::Up,
-                ..
-            } = event
-            {
-                let app = tray.app_handle();
-                if let Some(window) = app.get_webview_window("main") {
-                    let _ = window.show();
-                    let _ = window.set_focus();
+            match event {
+                TrayIconEvent::Click {
+                    button_state: MouseButtonState::Up,
+                    ..
+                } => {
+                    show_main_window(tray.app_handle());
                 }
+                _ => {}
             }
         })
         .build(app)?;
 
+    // 关键：阻止 TrayIcon 被 drop，否则托盘图标会消失
+    std::mem::forget(tray);
+
     Ok(())
 }
 
-/// 创建一个简单的托盘图标（16x16 像素，蓝色圆角方块）
+/// 从嵌入的原始 RGBA 数据加载托盘图标（32x32）
 fn create_tray_icon() -> Image<'static> {
-    // 32x32 RGBA 简单图标
-    let size = 32u32;
-    let mut pixels = Vec::with_capacity((size * size * 4) as usize);
+    const SIZE: u32 = 32;
+    let rgba = include_bytes!("../icons/tray-icon.rgba");
+    Image::new(rgba, SIZE, SIZE)
+}
 
-    for y in 0..size {
-        for x in 0..size {
-            // 圆角矩形
-            let margin = 4;
-            let in_rect = x >= margin && x < size - margin && y >= margin && y < size - margin;
-
-            if in_rect {
-                pixels.push(59);  // R
-                pixels.push(130); // G
-                pixels.push(246); // B
-                pixels.push(255); // A
-            } else {
-                pixels.push(0);
-                pixels.push(0);
-                pixels.push(0);
-                pixels.push(0);
-            }
+fn show_main_window<R: Runtime>(app: &tauri::AppHandle<R>) {
+    match app.get_webview_window("main") {
+        Some(window) => {
+            tracing::info!("显示主窗口");
+            let _ = window.show();
+            let _ = window.set_focus();
+        }
+        None => {
+            tracing::error!("找不到主窗口 (label: main)");
         }
     }
-
-    Image::new_owned(
-        pixels,
-        size,
-        size,
-    )
 }
+

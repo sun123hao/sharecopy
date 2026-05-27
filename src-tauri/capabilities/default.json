@@ -6,6 +6,11 @@
     "main"
   ],
   "permissions": [
-    "core:default"
+    "core:default",
+    "shell:allow-open",
+    "notification:default",
+    "autostart:default",
+    "dialog:allow-open",
+    "fs:default"
   ]
 }

@@ -14,8 +14,8 @@
 
 body {
   margin: 0;
-  background: #0f172a;
-  color: #e2e8f0;
+  background: #f8fafc;
+  color: #1e293b;
 }
 
 #root {
@@ -25,15 +25,15 @@ body {
 
 /* 自定义滚动条 */
 ::-webkit-scrollbar {
-  width: 6px;
+  width: 5px;
 }
 ::-webkit-scrollbar-track {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: rgba(148, 163, 184, 0.3);
+  background: rgba(148, 163, 184, 0.35);
   border-radius: 3px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(148, 163, 184, 0.5);
+  background: rgba(148, 163, 184, 0.55);
 }
