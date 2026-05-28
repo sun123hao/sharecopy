@@ -20,6 +20,19 @@ pub struct SyncStats {
     pub files_transferred: u64,
 }
 
+// ── 剪贴板历史条目 ──────────────────────────
+const MAX_HISTORY_ENTRIES: usize = 50;
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ClipboardHistoryEntry {
+    pub id: String,
+    #[serde(rename = "type")]
+    pub entry_type: String, // "text" 或 "image"
+    pub content: String,    // 文本内容或图片 base64
+    pub from_device: String,
+    pub timestamp: u64,
+}
+
 // ── 图片块组装器 ──────────────────────────────
 #[derive(Debug)]
 struct ImageChunkAssembler {
@@ -74,6 +87,7 @@ pub struct SyncEngine {
     transfer: Arc<FileTransferManager>,
     sync_enabled: Arc<AtomicBool>,
     stats: Arc<parking_lot::Mutex<SyncStats>>,
+    history: Arc<parking_lot::Mutex<Vec<ClipboardHistoryEntry>>>,
     image_assemblers: Arc<parking_lot::Mutex<Vec<ImageChunkAssembler>>>,
     app_handle: AppHandle,
 }
@@ -95,6 +109,7 @@ impl SyncEngine {
             transfer,
             sync_enabled: Arc::new(AtomicBool::new(true)),
             stats: Arc::new(parking_lot::Mutex::new(SyncStats::default())),
+            history: Arc::new(parking_lot::Mutex::new(Vec::new())),
             image_assemblers: Arc::new(parking_lot::Mutex::new(Vec::new())),
             app_handle,
         }
@@ -129,6 +144,18 @@ impl SyncEngine {
     }
 
     async fn handle_local_clipboard_change(&self, content: ClipboardContent) {
+        // 记录到历史
+        match &content {
+            ClipboardContent::Text(t) => {
+                self.add_history_entry("text", t, "本机");
+            }
+            ClipboardContent::Image { data, .. } => {
+                let b64 = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, data);
+                self.add_history_entry("image", &b64, "本机");
+            }
+            ClipboardContent::None => {}
+        }
+
         // 仅在有已连接设备时才广播
         if self.network.connected_count() == 0 {
             return;
@@ -203,13 +230,15 @@ impl SyncEngine {
     async fn handle_network_event(&self, event: NetworkEvent) {
         match event {
             NetworkEvent::MessageReceived {
-                from_device_id: _,
+                from_device_id: ref src_id,
                 message,
             } => match message {
                 Message::ClipboardText(payload) => {
                     if payload.source_device_id == self.device_id {
                         return;
                     }
+                    // 记录到历史
+                    self.add_history_entry("text", &payload.content, src_id);
                     let content = ClipboardContent::Text(payload.content);
                     let _ = self.watcher.write_safely(&content);
                     let _ = self.app_handle.emit("clipboard-updated", &serde_json::json!({"type": "text"}));
@@ -218,6 +247,9 @@ impl SyncEngine {
                     if payload.source_device_id == self.device_id {
                         return;
                     }
+                    // 记录到历史
+                    let b64 = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &payload.data);
+                    self.add_history_entry("image", &b64, src_id);
                     let content = ClipboardContent::Image {
                         width: payload.width,
                         height: payload.height,
@@ -277,6 +309,10 @@ impl SyncEngine {
                     .cloned()
                     .collect::<Vec<u8>>();
 
+                // 记录到历史
+                let b64 = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &content);
+                self.add_history_entry("image", &b64, &payload.source_device_id);
+
                 let clipboard_content = ClipboardContent::Image {
                     width: assembler.width,
                     height: assembler.height,
@@ -301,6 +337,11 @@ impl SyncEngine {
 
             if assembler.is_complete() {
                 let content = assembler.assemble();
+                // 记录到历史
+                if let ClipboardContent::Image { data, .. } = &content {
+                    let b64 = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, data);
+                    self.add_history_entry("image", &b64, &payload.source_device_id);
+                }
                 let _ = self.watcher.write_safely(&content);
                 let _ = self.app_handle.emit("clipboard-updated", &serde_json::json!({"type": "image"}));
             } else {
@@ -333,5 +374,28 @@ impl SyncEngine {
 
     pub fn get_stats(&self) -> SyncStats {
         self.stats.lock().clone()
+    }
+
+    pub fn get_history(&self) -> Vec<ClipboardHistoryEntry> {
+        self.history.lock().clone()
+    }
+
+    pub fn write_to_clipboard(&self, content: &ClipboardContent) -> crate::error::AppResult<()> {
+        self.watcher.write_safely(content)
+    }
+
+    fn add_history_entry(&self, entry_type: &str, content: &str, from_device: &str) {
+        let mut history = self.history.lock();
+        let entry = ClipboardHistoryEntry {
+            id: uuid::Uuid::new_v4().to_string(),
+            entry_type: entry_type.to_string(),
+            content: content.to_string(),
+            from_device: from_device.to_string(),
+            timestamp: chrono::Utc::now().timestamp_millis() as u64,
+        };
+        history.insert(0, entry);
+        if history.len() > MAX_HISTORY_ENTRIES {
+            history.truncate(MAX_HISTORY_ENTRIES);
+        }
     }
 }

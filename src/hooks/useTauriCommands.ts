@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
-import type { AppConfig, SyncStats } from '../types';
+import type { AppConfig, SyncStats, ClipboardEntry } from '../types';
 
 // ── 获取在线设备列表 ────────────────────
 export async function getDevices(): Promise<unknown[]> {
@@ -42,6 +42,11 @@ export async function sendFiles(paths: string[], target: string): Promise<void> 
 }
 
 // ── 获取剪贴板历史 ──────────────────────
-export async function getClipboardHistory(): Promise<unknown[]> {
+export async function getClipboardHistory(): Promise<ClipboardEntry[]> {
   return invoke('get_clipboard_history');
+}
+
+// ── 从历史重新复制 ──────────────────────
+export async function copyFromHistory(entryId: string): Promise<void> {
+  return invoke('copy_from_history', { entryId });
 }

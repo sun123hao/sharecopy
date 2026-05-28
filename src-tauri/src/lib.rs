@@ -95,9 +95,35 @@ async fn send_files(
 }
 
 #[tauri::command]
-async fn get_clipboard_history() -> Result<Vec<serde_json::Value>, String> {
-    // MVP 阶段返回空列表
-    Ok(vec![])
+async fn get_clipboard_history(
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<sync::ClipboardHistoryEntry>, String> {
+    Ok(state.sync_engine.get_history())
+}
+
+#[tauri::command]
+async fn copy_from_history(
+    state: tauri::State<'_, AppState>,
+    entry_id: String,
+) -> Result<(), String> {
+    let history = state.sync_engine.get_history();
+    if let Some(entry) = history.iter().find(|e| e.id == entry_id) {
+        let content = match entry.entry_type.as_str() {
+            "text" => clipboard::ClipboardContent::Text(entry.content.clone()),
+            "image" => {
+                use base64::Engine;
+                let data = base64::engine::general_purpose::STANDARD
+                    .decode(&entry.content)
+                    .map_err(|e| format!("Base64 解码失败: {}", e))?;
+                // arboard 写入 PNG 数据时无需精确宽高
+                clipboard::ClipboardContent::Image { width: 0, height: 0, data }
+            }
+            _ => return Err(format!("不支持的类型: {}", entry.entry_type)),
+        };
+        state.sync_engine.write_to_clipboard(&content)
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -301,6 +327,7 @@ pub fn run() {
             get_sync_stats,
             send_files,
             get_clipboard_history,
+            copy_from_history,
             is_sync_enabled,
         ])
         .build(tauri::generate_context!())

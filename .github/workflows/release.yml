@@ -37,34 +37,23 @@ jobs:
         run: npm ci
 
       - name: 构建 (Tauri)
-        uses: tauri-apps/tauri-action@v0
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          args: --target ${{ matrix.target }}-apple-darwin
-          tagName: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || '' }}
-          releaseName: 'ShareCopy v__VERSION__'
-          releaseBody: '详见 CHANGELOG'
-          releaseDraft: ${{ startsWith(github.ref, 'refs/tags/') }}
-          prerelease: false
-
-      - name: 代码签名 (ad-hoc)
+          CI: 'true'
         run: |
-          # 对 .app 内所有二进制文件进行 ad-hoc 签名
-          BUNDLE_DIR=$(find src-tauri/target -path "*/release/bundle/macos" -type d 2>/dev/null | head -1)
-          if [ -d "$BUNDLE_DIR" ]; then
-            APP=$(find "$BUNDLE_DIR" -name "*.app" -type d | head -1)
-            if [ -n "$APP" ]; then
-              echo "签名: $APP"
-              codesign --force --deep --sign - "$APP"
-            fi
-          fi
+          npm run tauri build -- --target ${{ matrix.target }}-apple-darwin
 
       - name: 上传 macOS 构建产物
         uses: actions/upload-artifact@v4
         with:
           name: ShareCopy-macOS-${{ matrix.target }}
           path: src-tauri/target/**/release/bundle/dmg/*.dmg
+
+      - name: 创建 Release (仅 tag 推送)
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          files: src-tauri/target/**/release/bundle/dmg/*.dmg
 
   # ── Windows 构建 ────────────────────────
   build-windows:
@@ -85,15 +74,17 @@ jobs:
         run: npm ci
 
       - name: 构建 (Tauri)
-        uses: tauri-apps/tauri-action@v0
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          releaseDraft: ${{ startsWith(github.ref, 'refs/tags/') }}
-          prerelease: false
+        run: npm run tauri build
 
       - name: 上传 Windows 构建产物
         uses: actions/upload-artifact@v4
         with:
           name: ShareCopy-Windows
           path: src-tauri/target/release/bundle/msi/*.msi
+
+      - name: 创建 Release (仅 tag 推送)
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          files: src-tauri/target/release/bundle/msi/*.msi
