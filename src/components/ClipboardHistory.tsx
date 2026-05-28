@@ -73,35 +73,35 @@ export function ClipboardHistory() {
     <div>
       <div className="flex items-center gap-2 mb-4">
         <div className="w-1 h-4 rounded-full bg-amber-500" />
-        <h2 className="text-sm font-semibold text-slate-700">剪贴板历史</h2>
+        <h2 className="text-sm font-semibold text-slate-700 dark:text-slate-200">剪贴板历史</h2>
       </div>
 
       {/* 统计概览 */}
       <div className="grid grid-cols-3 gap-2 mb-4">
-        <div className="p-3 rounded-xl bg-white border border-slate-200 text-center">
+        <div className="p-3 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-center">
           <FileText className="w-4 h-4 text-amber-400 mx-auto mb-1" />
-          <p className="text-lg font-bold text-slate-800">{stats.texts_synced}</p>
-          <p className="text-[10px] text-slate-400">条文本</p>
+          <p className="text-lg font-bold text-slate-800 dark:text-slate-200">{stats.texts_synced}</p>
+          <p className="text-[10px] text-slate-400 dark:text-slate-500">条文本</p>
         </div>
-        <div className="p-3 rounded-xl bg-white border border-slate-200 text-center">
+        <div className="p-3 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-center">
           <ImageIcon className="w-4 h-4 text-blue-400 mx-auto mb-1" />
-          <p className="text-lg font-bold text-slate-800">{stats.images_synced}</p>
-          <p className="text-[10px] text-slate-400">张图片</p>
+          <p className="text-lg font-bold text-slate-800 dark:text-slate-200">{stats.images_synced}</p>
+          <p className="text-[10px] text-slate-400 dark:text-slate-500">张图片</p>
         </div>
-        <div className="p-3 rounded-xl bg-white border border-slate-200 text-center">
+        <div className="p-3 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-center">
           <File className="w-4 h-4 text-emerald-400 mx-auto mb-1" />
-          <p className="text-lg font-bold text-slate-800">{stats.files_transferred}</p>
-          <p className="text-[10px] text-slate-400">个文件</p>
+          <p className="text-lg font-bold text-slate-800 dark:text-slate-200">{stats.files_transferred}</p>
+          <p className="text-[10px] text-slate-400 dark:text-slate-500">个文件</p>
         </div>
       </div>
 
       {!hasActivity ? (
         <div className="text-center py-10">
-          <div className="w-16 h-16 mx-auto mb-4 rounded-2xl bg-slate-100 flex items-center justify-center">
-            <ClipboardList className="w-7 h-7 text-slate-300" />
+          <div className="w-16 h-16 mx-auto mb-4 rounded-2xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center">
+            <ClipboardList className="w-7 h-7 text-slate-300 dark:text-slate-600" />
           </div>
-          <p className="text-sm text-slate-500">暂无同步记录</p>
-          <p className="text-xs text-slate-400 mt-1.5">
+          <p className="text-sm text-slate-500 dark:text-slate-400">暂无同步记录</p>
+          <p className="text-xs text-slate-400 dark:text-slate-500 mt-1.5">
             同步过的文本和图片将显示在这里
           </p>
         </div>
@@ -116,7 +116,7 @@ export function ClipboardHistory() {
                 placeholder="搜索历史..."
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                className="w-full pl-8 pr-7 py-1.5 text-xs rounded-lg border border-slate-200 bg-white focus:outline-none focus:border-amber-300 focus:ring-1 focus:ring-amber-100 transition-colors"
+                className="w-full pl-8 pr-7 py-1.5 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:border-amber-300 dark:focus:border-amber-500 focus:ring-1 focus:ring-amber-100 dark:focus:ring-amber-500/10 transition-colors"
               />
               {search && (
                 <button
@@ -132,12 +132,12 @@ export function ClipboardHistory() {
           {/* 历史列表 */}
           <div className="space-y-1.5">
             {filteredEntries.length === 0 ? (
-              <p className="text-center text-xs text-slate-400 py-6">无匹配记录</p>
+              <p className="text-center text-xs text-slate-400 dark:text-slate-500 py-6">无匹配记录</p>
             ) : (
               filteredEntries.map((entry) => (
                 <div
                   key={entry.id}
-                  className="group flex items-start gap-2.5 p-2.5 rounded-lg hover:bg-white hover:shadow-sm border border-transparent hover:border-slate-200 transition-all"
+                  className="group flex items-start gap-2.5 p-2.5 rounded-lg hover:bg-white dark:hover:bg-slate-800 hover:shadow-sm border border-transparent hover:border-slate-200 dark:hover:border-slate-700 transition-all"
                 >
                   {/* 类型图标 */}
                   <div className="flex-shrink-0 mt-0.5">
@@ -150,7 +150,7 @@ export function ClipboardHistory() {
 
                   {/* 内容 */}
                   <div className="flex-1 min-w-0">
-                    <p className="text-xs text-slate-700 leading-relaxed break-all">
+                    <p className="text-xs text-slate-700 dark:text-slate-300 leading-relaxed break-all">
                       {entry.type === 'text'
                         ? truncateText(entry.content)
                         : '[图片]'}

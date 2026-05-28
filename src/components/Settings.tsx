@@ -1,13 +1,15 @@
 import { useEffect, useState } from 'react';
-import { FolderOpen } from 'lucide-react';
+import { FolderOpen, Sun, Moon, Monitor } from 'lucide-react';
 import { useAppStore } from '../store/useAppStore';
+
+type Theme = 'system' | 'light' | 'dark';
 
 function Toggle({ checked, onChange }: { checked: boolean; onChange: () => void }) {
   return (
     <button
       onClick={onChange}
       className={`relative w-10 h-6 rounded-full transition-colors cursor-pointer ${
-        checked ? 'bg-amber-500' : 'bg-slate-300'
+        checked ? 'bg-amber-500' : 'bg-slate-300 dark:bg-slate-600'
       }`}
     >
       <div
@@ -19,7 +21,13 @@ function Toggle({ checked, onChange }: { checked: boolean; onChange: () => void 
   );
 }
 
-export function Settings() {
+const themeOptions: { value: Theme; label: string; icon: typeof Sun }[] = [
+  { value: 'system', label: '跟随系统', icon: Monitor },
+  { value: 'light', label: '浅色', icon: Sun },
+  { value: 'dark', label: '深色', icon: Moon },
+];
+
+export function Settings({ theme, setTheme }: { theme: Theme; setTheme: (t: Theme) => void }) {
   const config = useAppStore((s) => s.config);
   const syncEnabled = useAppStore((s) => s.syncEnabled);
   const loadConfig = useAppStore((s) => s.loadConfig);
@@ -90,50 +98,75 @@ export function Settings() {
     <div className="space-y-5">
       <div className="flex items-center gap-2 mb-4">
         <div className="w-1 h-4 rounded-full bg-amber-500" />
-        <h2 className="text-sm font-semibold text-slate-700">设置</h2>
+        <h2 className="text-sm font-semibold text-slate-700 dark:text-slate-200">设置</h2>
       </div>
 
       {/* 设备名称 */}
       <div>
-        <label className="text-[11px] text-slate-500 mb-1.5 block">设备名称</label>
+        <label className="text-[11px] text-slate-500 dark:text-slate-400 mb-1.5 block">设备名称</label>
         <input
           type="text"
           value={deviceName}
           onChange={(e) => setDeviceName(e.target.value)}
           onBlur={handleDeviceNameBlur}
-          className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2.5 text-sm text-slate-800 focus:outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-50 transition-all"
+          className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2.5 text-sm text-slate-800 dark:text-slate-200 focus:outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-50 dark:focus:ring-amber-500/10 transition-all"
         />
       </div>
 
       {/* 文件保存路径 */}
       <div>
-        <label className="text-[11px] text-slate-500 mb-1.5 block">文件保存路径</label>
+        <label className="text-[11px] text-slate-500 dark:text-slate-400 mb-1.5 block">文件保存路径</label>
         <div className="flex gap-2">
           <input
             type="text"
             value={saveDir}
             onChange={(e) => handleSaveDirChange(e.target.value)}
-            className="flex-1 bg-white border border-slate-200 rounded-xl px-3 py-2.5 text-sm text-slate-800 focus:outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-50 transition-all"
+            className="flex-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2.5 text-sm text-slate-800 dark:text-slate-200 focus:outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-50 dark:focus:ring-amber-500/10 transition-all"
           />
           <button
             onClick={handleSelectFolder}
-            className="flex items-center justify-center w-10 h-10 rounded-xl bg-white border border-slate-200 hover:bg-slate-50 transition-colors"
+            className="flex items-center justify-center w-10 h-10 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors"
           >
-            <FolderOpen className="w-4 h-4 text-slate-400" />
+            <FolderOpen className="w-4 h-4 text-slate-400 dark:text-slate-500" />
           </button>
         </div>
       </div>
 
+      {/* 主题选择 */}
+      <div>
+        <label className="text-[11px] text-slate-500 dark:text-slate-400 mb-1.5 block">主题</label>
+        <div className="flex gap-1.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-1">
+          {themeOptions.map((opt) => {
+            const isActive = theme === opt.value;
+            const Icon = opt.icon;
+            return (
+              <button
+                key={opt.value}
+                onClick={() => setTheme(opt.value)}
+                className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs transition-colors ${
+                  isActive
+                    ? 'bg-amber-50 dark:bg-amber-500/15 text-amber-600 dark:text-amber-400'
+                    : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300'
+                }`}
+              >
+                <Icon className="w-3.5 h-3.5" />
+                {opt.label}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
       {/* 开关项 */}
-      <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
+      <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl overflow-hidden">
         {/* 同步开关 */}
         <button
           onClick={() => setSyncEnabled(!syncEnabled)}
-          className="w-full flex items-center justify-between p-3.5 hover:bg-slate-50 transition-colors border-b border-slate-100"
+          className="w-full flex items-center justify-between p-3.5 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors border-b border-slate-100 dark:border-slate-700"
         >
           <div className="text-left">
-            <p className="text-sm font-medium text-slate-800">剪贴板同步</p>
-            <p className="text-[11px] text-slate-400 mt-0.5">
+            <p className="text-sm font-medium text-slate-800 dark:text-slate-200">剪贴板同步</p>
+            <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-0.5">
               自动同步文本和图片到其他设备
             </p>
           </div>
@@ -143,11 +176,11 @@ export function Settings() {
         {/* 开机自启 */}
         <button
           onClick={handleToggleAutoStart}
-          className="w-full flex items-center justify-between p-3.5 hover:bg-slate-50 transition-colors border-b border-slate-100"
+          className="w-full flex items-center justify-between p-3.5 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors border-b border-slate-100 dark:border-slate-700"
         >
           <div className="text-left">
-            <p className="text-sm font-medium text-slate-800">开机自启</p>
-            <p className="text-[11px] text-slate-400 mt-0.5">
+            <p className="text-sm font-medium text-slate-800 dark:text-slate-200">开机自启</p>
+            <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-0.5">
               登录系统时自动启动 ShareCopy
             </p>
           </div>
@@ -157,11 +190,11 @@ export function Settings() {
         {/* 自动接收 */}
         <button
           onClick={handleToggleAutoAccept}
-          className="w-full flex items-center justify-between p-3.5 hover:bg-slate-50 transition-colors"
+          className="w-full flex items-center justify-between p-3.5 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors"
         >
           <div className="text-left">
-            <p className="text-sm font-medium text-slate-800">自动接收文件</p>
-            <p className="text-[11px] text-slate-400 mt-0.5">
+            <p className="text-sm font-medium text-slate-800 dark:text-slate-200">自动接收文件</p>
+            <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-0.5">
               无需确认直接保存接收的文件
             </p>
           </div>
@@ -170,14 +203,14 @@ export function Settings() {
       </div>
 
       {/* 同步统计 */}
-      <div className="pt-4 border-t border-slate-200">
-        <p className="text-[11px] text-slate-500 mb-2">同步统计</p>
+      <div className="pt-4 border-t border-slate-200 dark:border-slate-800">
+        <p className="text-[11px] text-slate-500 dark:text-slate-400 mb-2">同步统计</p>
         <StatsSection />
       </div>
 
       {/* 版本信息 */}
-      <div className="pt-4 border-t border-slate-200">
-        <p className="text-[11px] text-slate-400">
+      <div className="pt-4 border-t border-slate-200 dark:border-slate-800">
+        <p className="text-[11px] text-slate-400 dark:text-slate-500">
           ShareCopy v0.1.0 · Tauri + Rust + React
         </p>
       </div>
@@ -196,17 +229,17 @@ function StatsSection() {
 
   return (
     <div className="grid grid-cols-3 gap-2 text-center">
-      <div className="p-3 rounded-xl bg-white border border-slate-200">
-        <p className="text-lg font-bold text-slate-800">{stats.texts_synced}</p>
-        <p className="text-[10px] text-slate-400 mt-0.5">文本</p>
+      <div className="p-3 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700">
+        <p className="text-lg font-bold text-slate-800 dark:text-slate-200">{stats.texts_synced}</p>
+        <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5">文本</p>
       </div>
-      <div className="p-3 rounded-xl bg-white border border-slate-200">
-        <p className="text-lg font-bold text-slate-800">{stats.images_synced}</p>
-        <p className="text-[10px] text-slate-400 mt-0.5">图片</p>
+      <div className="p-3 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700">
+        <p className="text-lg font-bold text-slate-800 dark:text-slate-200">{stats.images_synced}</p>
+        <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5">图片</p>
       </div>
-      <div className="p-3 rounded-xl bg-white border border-slate-200">
-        <p className="text-lg font-bold text-slate-800">{stats.files_transferred}</p>
-        <p className="text-[10px] text-slate-400 mt-0.5">文件</p>
+      <div className="p-3 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700">
+        <p className="text-lg font-bold text-slate-800 dark:text-slate-200">{stats.files_transferred}</p>
+        <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5">文件</p>
       </div>
     </div>
   );

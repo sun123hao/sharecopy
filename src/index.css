@@ -1,5 +1,8 @@
 @import "tailwindcss";
 
+/* class-based 暗色模式（通过 .dark 类切换） */
+@variant dark (&:where(.dark, .dark *));
+
 /* ShareCopy 全局样式 */
 :root {
   --sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
@@ -16,6 +19,13 @@ body {
   margin: 0;
   background: #f8fafc;
   color: #1e293b;
+}
+
+.dark body,
+body.dark,
+.dark {
+  background: #0f172a;
+  color: #e2e8f0;
 }
 
 #root {
@@ -36,4 +46,11 @@ body {
 }
 ::-webkit-scrollbar-thumb:hover {
   background: rgba(148, 163, 184, 0.55);
+}
+
+.dark ::-webkit-scrollbar-thumb {
+  background: rgba(71, 85, 105, 0.5);
+}
+.dark ::-webkit-scrollbar-thumb:hover {
+  background: rgba(71, 85, 105, 0.7);
 }

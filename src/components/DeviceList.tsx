@@ -61,19 +61,19 @@ export function DeviceList() {
       {/* 标题 */}
       <div className="flex items-center gap-2 mb-4">
         <div className="w-1 h-4 rounded-full bg-amber-500" />
-        <h2 className="text-sm font-semibold text-slate-700">在线设备</h2>
-        <span className="bg-slate-200 text-slate-500 text-[10px] px-1.5 py-0.5 rounded-full">
+        <h2 className="text-sm font-semibold text-slate-700 dark:text-slate-200">在线设备</h2>
+        <span className="bg-slate-200 dark:bg-slate-700 text-slate-500 dark:text-slate-400 text-[10px] px-1.5 py-0.5 rounded-full">
           {devices.length}
         </span>
       </div>
 
       {devices.length === 0 ? (
         <div className="text-center py-14">
-          <div className="w-16 h-16 mx-auto mb-4 rounded-2xl bg-slate-100 flex items-center justify-center">
-            <Monitor className="w-7 h-7 text-slate-300" />
+          <div className="w-16 h-16 mx-auto mb-4 rounded-2xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center">
+            <Monitor className="w-7 h-7 text-slate-300 dark:text-slate-600" />
           </div>
-          <p className="text-sm text-slate-500">未发现其他设备</p>
-          <p className="text-xs text-slate-400 mt-1.5">
+          <p className="text-sm text-slate-500 dark:text-slate-400">未发现其他设备</p>
+          <p className="text-xs text-slate-400 dark:text-slate-500 mt-1.5">
             请确保两台设备在同一局域网内
           </p>
         </div>
@@ -82,7 +82,7 @@ export function DeviceList() {
           {devices.map((device) => (
             <div
               key={device.device_id}
-              className="flex items-center gap-3 p-3 rounded-xl bg-white border border-slate-200 shadow-sm hover:shadow-md hover:border-slate-300 transition-all"
+              className="flex items-center gap-3 p-3 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-sm hover:shadow-md hover:border-slate-300 dark:hover:border-slate-600 transition-all"
             >
               {/* 首字母头像 */}
               <div
@@ -95,25 +95,25 @@ export function DeviceList() {
 
               {/* 设备信息 */}
               <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium text-slate-800 truncate">
+                <p className="text-sm font-medium text-slate-800 dark:text-slate-200 truncate">
                   {device.device_name}
                 </p>
-                <p className="text-[11px] text-slate-400">
+                <p className="text-[11px] text-slate-400 dark:text-slate-500">
                   {device.ip_address}
                 </p>
               </div>
 
               {/* 端口标签 + 操作 */}
               <div className="flex items-center gap-2">
-                <span className="bg-slate-100 text-slate-500 text-[10px] px-2 py-0.5 rounded-md">
+                <span className="bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400 text-[10px] px-2 py-0.5 rounded-md">
                   :{device.tcp_port}
                 </span>
                 <button
                   onClick={() => handleSendFile(device.device_id)}
-                  className="p-1.5 rounded-lg hover:bg-amber-50 transition-colors"
+                  className="p-1.5 rounded-lg hover:bg-amber-50 dark:hover:bg-amber-500/10 transition-colors"
                   title="发送文件"
                 >
-                  <SendHorizonal className="w-4 h-4 text-slate-400 hover:text-amber-500" />
+                  <SendHorizonal className="w-4 h-4 text-slate-400 dark:text-slate-500 hover:text-amber-500" />
                 </button>
                 <span className="w-2 h-2 rounded-full bg-emerald-500 shadow-[0_0_5px_rgba(16,185,129,0.3)]" />
               </div>
@@ -123,17 +123,17 @@ export function DeviceList() {
       )}
 
       {/* 本机信息 */}
-      <div className="mt-6 p-3 rounded-xl bg-slate-100/70 border border-slate-200/70">
+      <div className="mt-6 p-3 rounded-xl bg-slate-100/70 dark:bg-slate-800/70 border border-slate-200/70 dark:border-slate-700/70">
         <div className="flex items-center justify-between mb-1">
-          <span className="text-[10px] text-slate-400 uppercase tracking-wider">本机</span>
-          <span className="bg-emerald-50 text-emerald-600 border border-emerald-200 text-[10px] px-2 py-0.5 rounded-full">
+          <span className="text-[10px] text-slate-400 dark:text-slate-500 uppercase tracking-wider">本机</span>
+          <span className="bg-emerald-50 dark:bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-500/30 text-[10px] px-2 py-0.5 rounded-full">
             在线
           </span>
         </div>
-        <p className="text-sm font-medium text-slate-700">
+        <p className="text-sm font-medium text-slate-700 dark:text-slate-300">
           {config?.device_name ?? '此设备'}
         </p>
-        <p className="text-[11px] text-slate-400 mt-1">
+        <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-1">
           端口 {config?.tcp_port ?? 54322} · 等待其他设备连接...
         </p>
       </div>
