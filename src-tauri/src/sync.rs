@@ -135,10 +135,16 @@ impl SyncEngine {
                     self.handle_network_event(event).await;
                 }
                 // 设备发现事件
-                Ok(event) = discovery_rx.recv() => {
-                    self.handle_discovery_event(event).await;
-                }
-                else => break,
+                result = discovery_rx.recv() => match result {
+                    Ok(event) => {
+                        self.handle_discovery_event(event).await;
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                        tracing::warn!("设备发现事件滞后 {} 条，继续运行", n);
+                        // Lagged 后可恢复，继续循环
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                },
             }
         }
     }
@@ -353,7 +359,13 @@ impl SyncEngine {
     async fn handle_discovery_event(&self, event: DiscoveryEvent) {
         match event {
             DiscoveryEvent::DeviceFound(device) => {
-                let _ = self.network.connect_to_device(&device).await;
+                let device_name = device.device_name.clone();
+                match self.network.connect_to_device(&device).await {
+                    Ok(()) => {}
+                    Err(e) => {
+                        tracing::warn!("连接设备 {} 失败: {}", device_name, e);
+                    }
+                }
             }
             DiscoveryEvent::DeviceLost(_device_id) => {
                 // 连接管理器会自动处理断开

@@ -22,8 +22,8 @@ pub fn create_tray<R: Runtime>(app: &tauri::App<R>) -> tauri::Result<()> {
 
     let _tray = TrayIconBuilder::new()
         .icon(icon)
+        .icon_as_template(false)
         .menu(&menu)
-        // macOS: 左右键都弹出菜单（默认行为）
         .show_menu_on_left_click(true)
         .on_menu_event(move |app, event| {
             let id = event.id().as_ref();

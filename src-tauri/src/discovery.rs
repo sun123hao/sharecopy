@@ -54,7 +54,7 @@ impl DiscoveryService {
 
         Ok(Self {
             mdns,
-            service_name: format!("{}.{}", device_id, SERVICE_TYPE),
+            service_name: device_id.clone(),
             discovered_devices: Arc::new(DashMap::new()),
             event_tx,
             device_id,
@@ -197,7 +197,9 @@ impl DiscoveryService {
 
     /// 停止服务
     pub fn stop(&self) -> AppResult<()> {
-        let receiver = self.mdns.unregister(&self.service_name);
+        // 构造完整服务名: "{instance_name}.{service_type}"
+        let fullname = format!("{}.{}", self.service_name, SERVICE_TYPE);
+        let receiver = self.mdns.unregister(&fullname);
         if let Err(e) = receiver {
             tracing::warn!("取消注册 mDNS 服务失败: {}", e);
         }
