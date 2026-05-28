@@ -5,7 +5,6 @@
 
 use jni::objects::{GlobalRef, JObject, JValue};
 use jni::JavaVM;
-use ndk_context;
 use sha2::{Digest, Sha256};
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -14,51 +13,114 @@ use crate::error::AppResult;
 
 pub struct AndroidClipboardBackend {
     jvm: JavaVM,
-    context: GlobalRef,
-    last_hash: AtomicU64,
+    _context: GlobalRef,
 }
 
 impl AndroidClipboardBackend {
     pub fn new() -> AppResult<Self> {
-        let ctx = ndk_context::android_context();
+        // 通过 JNI_GetCreatedJavaVMs 获取已存在的 JVM（Tauri 会在启动时创建）
+        let jvm = find_existing_jvm()?;
 
-        let jvm = unsafe {
-            JavaVM::from_raw(ctx.vm() as *mut *const jni::sys::JNIInvokeInterface)
-        }
-        .map_err(|e| {
-            crate::error::AppError::Clipboard(format!("获取 JavaVM 失败: {}", e))
-        })?;
+        let context_global = {
+            let mut env = jvm.attach_current_thread().map_err(|e| {
+                crate::error::AppError::Clipboard(format!("JNI attach 失败: {}", e))
+            })?;
 
-        let mut env = jvm.attach_current_thread().map_err(|e| {
-            crate::error::AppError::Clipboard(format!("JNI attach 失败: {}", e))
-        })?;
-
-        let context_obj = unsafe { JObject::from_raw(ctx.context() as jni::sys::jobject) };
-        let context_global = env.new_global_ref(context_obj).map_err(|e| {
-            crate::error::AppError::Clipboard(format!("创建 GlobalRef 失败: {}", e))
-        })?;
+            // 通过 android.app.ActivityThread 获取 Application Context
+            // 这条路可能失败，尝试多种方式
+            let context = get_app_context(&mut env)?;
+            env.new_global_ref(context).map_err(|e| {
+                crate::error::AppError::Clipboard(format!("创建 GlobalRef 失败: {}", e))
+            })?
+        };
 
         Ok(Self {
             jvm,
-            context: context_global,
-            last_hash: AtomicU64::new(0),
+            _context: context_global,
         })
     }
 
-    /// 在 JNI 环境中执行操作
     fn with_jni<F, R>(&self, f: F) -> AppResult<R>
     where
-        F: FnOnce(&mut jni::JNIEnv, &JObject, &JObject) -> AppResult<R>,
+        F: for<'a> FnOnce(&mut jni::JNIEnv<'a>, &JObject<'a>, &JObject<'a>) -> AppResult<R>,
     {
         let mut env = self.jvm.attach_current_thread().map_err(|e| {
             crate::error::AppError::Clipboard(format!("JNI 线程附加失败: {}", e))
         })?;
 
-        let ctx = self.context.as_obj();
+        let ctx = self._context.as_obj();
         let svc = get_clipboard_service(&mut env, ctx)?;
 
         f(&mut env, ctx, &svc)
     }
+}
+
+// JVM 原始指针（JNI_OnLoad 中缓存），存为 usize 绕过 Send/Sync 限制
+static GLOBAL_JVM_PTR: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+/// JNI 加载时由 Android 系统自动调用
+#[no_mangle]
+pub extern "system" fn JNI_OnLoad(
+    vm: *mut jni::sys::JavaVM,
+    _reserved: *mut std::ffi::c_void,
+) -> jni::sys::jint {
+    GLOBAL_JVM_PTR.store(vm as usize, std::sync::atomic::Ordering::Release);
+    jni::sys::JNI_VERSION_1_6
+}
+
+/// 获取已缓存的 JVM
+fn find_existing_jvm() -> AppResult<JavaVM> {
+    let ptr_val = GLOBAL_JVM_PTR.load(std::sync::atomic::Ordering::Acquire);
+    if ptr_val == 0 {
+        return Err(crate::error::AppError::Clipboard("JVM 尚未初始化".into()));
+    }
+    let ptr = ptr_val as *mut jni::sys::JavaVM;
+    unsafe { JavaVM::from_raw(ptr) }.map_err(|e| {
+        crate::error::AppError::Clipboard(format!("无法从 raw pointer 创建 JavaVM: {}", e))
+    })
+}
+
+/// 获取 Android Application Context
+fn get_app_context<'a>(env: &mut jni::JNIEnv<'a>) -> AppResult<JObject<'a>> {
+    // 通过 android.app.ActivityThread.currentActivityThread().getApplication()
+    let ath_cls = env
+        .find_class("android/app/ActivityThread")
+        .map_err(|e| {
+            crate::error::AppError::Clipboard(format!("find_class ActivityThread: {}", e))
+        })?;
+
+    let ath = env
+        .call_static_method(
+            &ath_cls,
+            "currentActivityThread",
+            "()Landroid/app/ActivityThread;",
+            &[],
+        )
+        .and_then(|v| v.l())
+        .map_err(|e| {
+            crate::error::AppError::Clipboard(format!("currentActivityThread: {}", e))
+        })?;
+
+    if ath.is_null() {
+        return Err(crate::error::AppError::Clipboard(
+            "ActivityThread.currentActivityThread() 返回 null".into(),
+        ));
+    }
+
+    let app = env
+        .call_method(&ath, "getApplication", "()Landroid/app/Application;", &[])
+        .and_then(|v| v.l())
+        .map_err(|e| {
+            crate::error::AppError::Clipboard(format!("getApplication: {}", e))
+        })?;
+
+    if app.is_null() {
+        return Err(crate::error::AppError::Clipboard(
+            "getApplication() 返回 null".into(),
+        ));
+    }
+
+    Ok(app)
 }
 
 impl ClipboardBackend for AndroidClipboardBackend {
@@ -88,14 +150,12 @@ impl ClipboardBackend for AndroidClipboardBackend {
                 return Ok(ClipboardContent::None);
             }
 
-            // 尝试读文本
             if let Ok(text_str) = read_item_text(env, &item) {
                 if !text_str.is_empty() {
                     return Ok(ClipboardContent::Text(text_str));
                 }
             }
 
-            // 尝试读图片 URI
             let uri = call_method_ret(env, &item, "getUri", "()Landroid/net/Uri;", &[])?;
             if !uri.is_null() {
                 return read_image_from_uri(env, ctx, &uri);
@@ -121,7 +181,7 @@ impl ClipboardBackend for AndroidClipboardBackend {
 
                 let clip = env
                     .call_static_method(
-                        cls,
+                        &cls,
                         "newPlainText",
                         "(Ljava/lang/CharSequence;Ljava/lang/CharSequence;)Landroid/content/ClipData;",
                         &[JValue::Object(&label), JValue::Object(&text_j)],
@@ -151,7 +211,6 @@ impl ClipboardBackend for AndroidClipboardBackend {
     }
 
     fn change_count(&self) -> AppResult<u64> {
-        // Android 无原生 change count，用内容哈希模拟
         self.read().map(|content| {
             let hash = content.content_hash();
             let digest = Sha256::digest(hash.as_bytes());
@@ -173,7 +232,7 @@ fn get_clipboard_service<'a>(
     })?;
 
     let svc_name = env
-        .get_static_field(cls, "CLIPBOARD_SERVICE", "Ljava/lang/String;")
+        .get_static_field(&cls, "CLIPBOARD_SERVICE", "Ljava/lang/String;")
         .and_then(|v| v.l())
         .map_err(|e| {
             crate::error::AppError::Clipboard(format!("CLIPBOARD_SERVICE: {}", e))
@@ -191,13 +250,12 @@ fn get_clipboard_service<'a>(
     })
 }
 
-/// 调用返回对象的方法，简化返回值提取
 fn call_method_ret<'a>(
     env: &mut jni::JNIEnv<'a>,
     obj: &JObject<'a>,
     name: &str,
     sig: &str,
-    args: &[JValue<'a>],
+    args: &[JValue<'a, 'a>],
 ) -> AppResult<JObject<'a>> {
     env.call_method(obj, name, sig, args)
         .and_then(|v| v.l())
@@ -206,7 +264,7 @@ fn call_method_ret<'a>(
         })
 }
 
-fn read_item_text(env: &mut jni::JNIEnv, item: &JObject) -> AppResult<String> {
+fn read_item_text<'a>(env: &mut jni::JNIEnv<'a>, item: &JObject<'a>) -> AppResult<String> {
     let text = call_method_ret(
         env,
         item,
@@ -240,10 +298,10 @@ fn read_item_text(env: &mut jni::JNIEnv, item: &JObject) -> AppResult<String> {
     }
 }
 
-fn read_image_from_uri(
-    env: &mut jni::JNIEnv,
-    ctx: &JObject,
-    uri: &JObject,
+fn read_image_from_uri<'a>(
+    env: &mut jni::JNIEnv<'a>,
+    ctx: &JObject<'a>,
+    uri: &JObject<'a>,
 ) -> AppResult<ClipboardContent> {
     let resolver = call_method_ret(
         env,
@@ -253,13 +311,17 @@ fn read_image_from_uri(
         &[],
     )?;
 
-    let stream = call_method_ret(
-        env,
-        &resolver,
-        "openInputStream",
-        "(Landroid/net/Uri;)Ljava/io/InputStream;",
-        &[JValue::Object(uri)],
-    )?;
+    let stream = env
+        .call_method(
+            &resolver,
+            "openInputStream",
+            "(Landroid/net/Uri;)Ljava/io/InputStream;",
+            &[JValue::Object(uri)],
+        )
+        .and_then(|v| v.l())
+        .map_err(|e| {
+            crate::error::AppError::Clipboard(format!("openInputStream: {}", e))
+        })?;
 
     if stream.is_null() {
         return Ok(ClipboardContent::None);
@@ -270,7 +332,6 @@ fn read_image_from_uri(
         return Ok(ClipboardContent::None);
     }
 
-    // 已是 PNG 则直接用
     if bytes.len() >= 4 && &bytes[..4] == b"\x89PNG" {
         return Ok(ClipboardContent::Image {
             width: 0,
@@ -279,14 +340,13 @@ fn read_image_from_uri(
         });
     }
 
-    // 否则用 BitmapFactory 转 PNG
     decode_image_to_png(env, &bytes)
 }
 
-fn read_input_stream_bytes(env: &mut jni::JNIEnv, stream: &JObject) -> AppResult<Vec<u8>> {
+fn read_input_stream_bytes<'a>(env: &mut jni::JNIEnv<'a>, stream: &JObject<'a>) -> AppResult<Vec<u8>> {
     let baos = env
         .find_class("java/io/ByteArrayOutputStream")
-        .and_then(|cls| env.new_object(cls, "()V", &[]))
+        .and_then(|cls| env.new_object(&cls, "()V", &[]))
         .map_err(|e| {
             crate::error::AppError::Clipboard(format!("ByteArrayOutputStream: {}", e))
         })?;
@@ -319,40 +379,44 @@ fn read_input_stream_bytes(env: &mut jni::JNIEnv, stream: &JObject) -> AppResult
 
     let arr = unsafe { jni::objects::JByteArray::from_raw(result.into_raw()) };
     let len = env.get_array_length(&arr).unwrap_or(0) as usize;
-    let mut buf = vec![0u8; len];
-    if len > 0 {
-        env.get_byte_array_region(&arr, 0, &mut buf).map_err(|e| {
-            crate::error::AppError::Clipboard(format!("get_byte_array_region: {}", e))
-        })?;
+    if len == 0 {
+        return Ok(Vec::new());
     }
-    Ok(buf)
+
+    let elements = unsafe {
+        env.get_array_elements(&arr, jni::objects::ReleaseMode::NoCopyBack)
+    }
+    .map_err(|e| {
+        crate::error::AppError::Clipboard(format!("get_array_elements: {}", e))
+    })?;
+
+    let slice = unsafe { std::slice::from_raw_parts(elements.as_ptr() as *const u8, len) };
+    Ok(slice.to_vec())
 }
 
-fn decode_image_to_png(env: &mut jni::JNIEnv, data: &[u8]) -> AppResult<ClipboardContent> {
-    let arr = env.byte_array_from_slice(data).map_err(|e| {
-        crate::error::AppError::Clipboard(format!("byte_array_from_slice: {}", e))
-    })?;
+fn decode_image_to_png<'a>(env: &mut jni::JNIEnv<'a>, data: &[u8]) -> AppResult<ClipboardContent> {
+    let arr = env
+        .byte_array_from_slice(data)
+        .map_err(|e| {
+            crate::error::AppError::Clipboard(format!("byte_array_from_slice: {}", e))
+        })?;
 
-    let bf = call_method_ret(
-        env,
-        &env.find_class("android/graphics/BitmapFactory").map_err(|e| {
+    let bf_cls = env
+        .find_class("android/graphics/BitmapFactory")
+        .map_err(|e| {
             crate::error::AppError::Clipboard(format!("BitmapFactory: {}", e))
-        })?,
-        "decodeByteArray",
-        "([BII)Landroid/graphics/Bitmap;",
-        &[JValue::Object(&arr), JValue::Int(0), JValue::Int(data.len() as i32)],
-    )?;
+        })?;
 
-    // call_method_ret 需要 obj 参数，但这是静态方法，用 JObject::null()
-    let bf_cls = env.find_class("android/graphics/BitmapFactory").map_err(|e| {
-        crate::error::AppError::Clipboard(format!("BitmapFactory: {}", e))
-    })?;
     let bitmap = env
         .call_static_method(
-            bf_cls,
+            &bf_cls,
             "decodeByteArray",
             "([BII)Landroid/graphics/Bitmap;",
-            &[JValue::Object(&arr), JValue::Int(0), JValue::Int(data.len() as i32)],
+            &[
+                JValue::Object(&arr),
+                JValue::Int(0),
+                JValue::Int(data.len() as i32),
+            ],
         )
         .and_then(|v| v.l())
         .map_err(|e| {
@@ -363,10 +427,9 @@ fn decode_image_to_png(env: &mut jni::JNIEnv, data: &[u8]) -> AppResult<Clipboar
         return Ok(ClipboardContent::None);
     }
 
-    // bitmap.compress(Bitmap.CompressFormat.PNG, 100, baos)
     let baos = env
         .find_class("java/io/ByteArrayOutputStream")
-        .and_then(|cls| env.new_object(cls, "()V", &[]))
+        .and_then(|cls| env.new_object(&cls, "()V", &[]))
         .map_err(|e| {
             crate::error::AppError::Clipboard(format!("ByteArrayOutputStream: {}", e))
         })?;
@@ -377,7 +440,7 @@ fn decode_image_to_png(env: &mut jni::JNIEnv, data: &[u8]) -> AppResult<Clipboar
             crate::error::AppError::Clipboard(format!("CompressFormat: {}", e))
         })?;
     let png_format = env
-        .get_static_field(cf_cls, "PNG", "Landroid/graphics/Bitmap$CompressFormat;")
+        .get_static_field(&cf_cls, "PNG", "Landroid/graphics/Bitmap$CompressFormat;")
         .and_then(|v| v.l())
         .map_err(|e| {
             crate::error::AppError::Clipboard(format!("CompressFormat.PNG: {}", e))
@@ -387,7 +450,11 @@ fn decode_image_to_png(env: &mut jni::JNIEnv, data: &[u8]) -> AppResult<Clipboar
         &bitmap,
         "compress",
         "(Landroid/graphics/Bitmap$CompressFormat;ILjava/io/OutputStream;)Z",
-        &[JValue::Object(&png_format), JValue::Int(100), JValue::Object(&baos)],
+        &[
+            JValue::Object(&png_format),
+            JValue::Int(100),
+            JValue::Object(&baos),
+        ],
     )
     .map_err(|e| {
         crate::error::AppError::Clipboard(format!("compress: {}", e))
@@ -400,16 +467,14 @@ fn decode_image_to_png(env: &mut jni::JNIEnv, data: &[u8]) -> AppResult<Clipboar
     })
 }
 
-fn write_image_to_clipboard(
-    env: &mut jni::JNIEnv,
-    ctx: &JObject,
-    svc: &JObject,
+fn write_image_to_clipboard<'a>(
+    env: &mut jni::JNIEnv<'a>,
+    ctx: &JObject<'a>,
+    svc: &JObject<'a>,
     data: &[u8],
 ) -> AppResult<()> {
-    // context.getCacheDir()
     let cache_dir = call_method_ret(env, ctx, "getCacheDir", "()Ljava/io/File;", &[])?;
 
-    // getAbsolutePath()
     let abs_path = call_method_ret(env, &cache_dir, "getAbsolutePath", "()Ljava/lang/String;", &[])?;
     let path: String = if !abs_path.is_null() {
         unsafe {
@@ -427,33 +492,28 @@ fn write_image_to_clipboard(
         crate::error::AppError::Clipboard(format!("new_string: {}", e))
     })?;
 
-    // 写入文件
+    let fos_cls = env.find_class("java/io/FileOutputStream").map_err(|e| {
+        crate::error::AppError::Clipboard(format!("FileOutputStream: {}", e))
+    })?;
     let fos = env
-        .find_class("java/io/FileOutputStream")
-        .and_then(|cls| env.new_object(cls, "(Ljava/lang/String;)V", &[JValue::Object(&path_str)]))
-        .map_err(|e| {
-            crate::error::AppError::Clipboard(format!("FileOutputStream: {}", e))
-        })?;
+        .new_object(&fos_cls, "(Ljava/lang/String;)V", &[JValue::Object(&path_str)])
+        .map_err(|e| crate::error::AppError::Clipboard(format!("FileOutputStream: {}", e)))?;
 
     let byte_arr = env.byte_array_from_slice(data).map_err(|e| {
         crate::error::AppError::Clipboard(format!("byte_array_from_slice: {}", e))
     })?;
 
     env.call_method(&fos, "write", "([B)V", &[JValue::Object(&byte_arr)])
-        .map_err(|e| {
-            crate::error::AppError::Clipboard(format!("fos.write: {}", e))
-        })?;
-    env.call_method(&fos, "close", "()V", &[]).map_err(|e| {
-        crate::error::AppError::Clipboard(format!("fos.close: {}", e))
-    })?;
+        .map_err(|e| crate::error::AppError::Clipboard(format!("fos.write: {}", e)))?;
+    env.call_method(&fos, "close", "()V", &[])
+        .map_err(|e| crate::error::AppError::Clipboard(format!("fos.close: {}", e)))?;
 
-    // 创建 File 对象 -> Uri
+    let file_cls = env.find_class("java/io/File").map_err(|e| {
+        crate::error::AppError::Clipboard(format!("File: {}", e))
+    })?;
     let file = env
-        .find_class("java/io/File")
-        .and_then(|cls| env.new_object(cls, "(Ljava/lang/String;)V", &[JValue::Object(&path_str)]))
-        .map_err(|e| {
-            crate::error::AppError::Clipboard(format!("new File: {}", e))
-        })?;
+        .new_object(&file_cls, "(Ljava/lang/String;)V", &[JValue::Object(&path_str)])
+        .map_err(|e| crate::error::AppError::Clipboard(format!("new File: {}", e)))?;
 
     let uri_cls = env.find_class("android/net/Uri").map_err(|e| {
         crate::error::AppError::Clipboard(format!("Uri: {}", e))
@@ -461,17 +521,14 @@ fn write_image_to_clipboard(
 
     let uri = env
         .call_static_method(
-            uri_cls,
+            &uri_cls,
             "fromFile",
             "(Ljava/io/File;)Landroid/net/Uri;",
             &[JValue::Object(&file)],
         )
         .and_then(|v| v.l())
-        .map_err(|e| {
-            crate::error::AppError::Clipboard(format!("Uri.fromFile: {}", e))
-        })?;
+        .map_err(|e| crate::error::AppError::Clipboard(format!("Uri.fromFile: {}", e)))?;
 
-    // ClipData.newUri(resolver, "image", uri)
     let resolver = call_method_ret(
         env,
         ctx,
@@ -489,15 +546,17 @@ fn write_image_to_clipboard(
 
     let clip = env
         .call_static_method(
-            clip_cls,
+            &clip_cls,
             "newUri",
             "(Landroid/content/ContentResolver;Ljava/lang/CharSequence;Landroid/net/Uri;)Landroid/content/ClipData;",
-            &[JValue::Object(&resolver), JValue::Object(&label), JValue::Object(&uri)],
+            &[
+                JValue::Object(&resolver),
+                JValue::Object(&label),
+                JValue::Object(&uri),
+            ],
         )
         .and_then(|v| v.l())
-        .map_err(|e| {
-            crate::error::AppError::Clipboard(format!("ClipData.newUri: {}", e))
-        })?;
+        .map_err(|e| crate::error::AppError::Clipboard(format!("ClipData.newUri: {}", e)))?;
 
     env.call_method(
         svc,
@@ -505,9 +564,7 @@ fn write_image_to_clipboard(
         "(Landroid/content/ClipData;)V",
         &[JValue::Object(&clip)],
     )
-    .map_err(|e| {
-        crate::error::AppError::Clipboard(format!("setPrimaryClip: {}", e))
-    })?;
+    .map_err(|e| crate::error::AppError::Clipboard(format!("setPrimaryClip: {}", e)))?;
 
     Ok(())
 }
