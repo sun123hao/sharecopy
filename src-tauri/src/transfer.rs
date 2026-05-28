@@ -18,16 +18,21 @@ pub struct TransferProgress {
     pub file_name: String,
     pub file_size: u64,
     pub bytes_transferred: u64,
+    pub progress: f64, // 0.0 ~ 1.0
     pub state: TransferState,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub save_path: Option<String>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum TransferState {
-    Preparing,
-    Transferring(f64), // 0.0 ~ 1.0
-    Verifying,
-    Completed(String), // 保存路径
-    Failed(String),    // 错误信息
+    Pending,
+    Transferring,
+    Completed,
+    Failed,
 }
 
 // ── 进行中的传输（接收端）────────────────────
@@ -109,7 +114,10 @@ impl FileTransferManager {
             file_name: file_name.clone(),
             file_size,
             bytes_transferred: 0,
-            state: TransferState::Transferring(0.0),
+            progress: 0.0,
+            state: TransferState::Transferring,
+            error: None,
+            save_path: None,
         });
 
         // 分块发送
@@ -134,14 +142,35 @@ impl FileTransferManager {
                     sha256_chunk: chunk_sha256,
                 });
 
-                let _ = network.send(&target_id, &msg);
+                if let Err(e) = network.send(&target_id, &msg) {
+                    tracing::error!("发送文件块 {} 失败: {}", i, e);
+                    let _ = progress_tx.send(TransferProgress {
+                        transfer_id: tid.clone(),
+                        file_name: fname.clone(),
+                        file_size,
+                        bytes_transferred: end as u64,
+                        progress: end as f64 / file_size as f64,
+                        state: TransferState::Failed,
+                        error: Some(format!("发送失败: {}", e)),
+                        save_path: None,
+                    });
+                    return;
+                }
 
+                let progress = end as f64 / file_size as f64;
                 let _ = progress_tx.send(TransferProgress {
                     transfer_id: tid.clone(),
                     file_name: fname.clone(),
                     file_size,
                     bytes_transferred: end as u64,
-                    state: TransferState::Transferring(end as f64 / file_size as f64),
+                    progress,
+                    state: if i + 1 == total_chunks {
+                        TransferState::Completed
+                    } else {
+                        TransferState::Transferring
+                    },
+                    error: None,
+                    save_path: None,
                 });
             }
         });
@@ -169,7 +198,10 @@ impl FileTransferManager {
             file_name: payload.file_name.clone(),
             file_size: payload.file_size,
             bytes_transferred: 0,
-            state: TransferState::Preparing,
+            progress: 0.0,
+            state: TransferState::Pending,
+            error: None,
+            save_path: None,
         });
     }
 
@@ -203,7 +235,10 @@ impl FileTransferManager {
             file_name: transfer.file_name.clone(),
             file_size: transfer.file_size,
             bytes_transferred: received * CHUNK_SIZE as u64,
-            state: TransferState::Transferring(progress),
+            progress,
+            state: TransferState::Transferring,
+            error: None,
+            save_path: None,
         });
 
         // 检查是否集齐所有块
@@ -233,7 +268,10 @@ impl FileTransferManager {
                         file_name: file_name.clone(),
                         file_size: transfer.file_size,
                         bytes_transferred: data.len() as u64,
-                        state: TransferState::Failed("文件校验失败".into()),
+                        progress: 1.0,
+                        state: TransferState::Failed,
+                        error: Some("文件校验失败".into()),
+                        save_path: None,
                     });
                     return;
                 }
@@ -246,7 +284,10 @@ impl FileTransferManager {
                         file_name: file_name.clone(),
                         file_size: transfer.file_size,
                         bytes_transferred: data.len() as u64,
-                        state: TransferState::Failed(format!("保存失败: {}", e)),
+                        progress: 1.0,
+                        state: TransferState::Failed,
+                        error: Some(format!("保存失败: {}", e)),
+                        save_path: None,
                     });
                     return;
                 }
@@ -256,7 +297,10 @@ impl FileTransferManager {
                     file_name,
                     file_size: transfer.file_size,
                     bytes_transferred: data.len() as u64,
-                    state: TransferState::Completed(save_path.to_string_lossy().to_string()),
+                    progress: 1.0,
+                    state: TransferState::Completed,
+                    error: None,
+                    save_path: Some(save_path.to_string_lossy().to_string()),
                 });
             });
         }

@@ -409,11 +409,15 @@ impl NetworkManager {
 
     /// 发送消息到指定设备
     pub fn send(&self, target_device_id: &str, message: &Message) -> AppResult<()> {
-        if let Some(tx) = self.connections.get(target_device_id) {
-            let encoded = message.encode()?;
-            tx.send(encoded).map_err(|_| AppError::ChannelSend)?;
-        }
-        Ok(())
+        let tx = self
+            .connections
+            .get(target_device_id)
+            .ok_or_else(|| AppError::Network(std::io::Error::new(
+                std::io::ErrorKind::NotConnected,
+                format!("设备未连接: {}", target_device_id),
+            )))?;
+        let encoded = message.encode()?;
+        tx.send(encoded).map_err(|_| AppError::ChannelSend)
     }
 
     /// 广播消息到所有已连接设备

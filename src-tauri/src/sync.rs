@@ -89,6 +89,8 @@ pub struct SyncEngine {
     stats: Arc<parking_lot::Mutex<SyncStats>>,
     history: Arc<parking_lot::Mutex<Vec<ClipboardHistoryEntry>>>,
     image_assemblers: Arc<parking_lot::Mutex<Vec<ImageChunkAssembler>>>,
+    /// 无连接时缓存的最新剪贴板内容，设备连接后立即广播
+    pending_clipboard: Arc<parking_lot::Mutex<Option<(ClipboardContent, String)>>>,
     app_handle: AppHandle,
 }
 
@@ -111,6 +113,7 @@ impl SyncEngine {
             stats: Arc::new(parking_lot::Mutex::new(SyncStats::default())),
             history: Arc::new(parking_lot::Mutex::new(Vec::new())),
             image_assemblers: Arc::new(parking_lot::Mutex::new(Vec::new())),
+            pending_clipboard: Arc::new(parking_lot::Mutex::new(None)),
             app_handle,
         }
     }
@@ -162,8 +165,10 @@ impl SyncEngine {
             ClipboardContent::None => {}
         }
 
-        // 仅在有已连接设备时才广播
+        // 无连接时缓存内容，设备连上后立即广播
         if self.network.connected_count() == 0 {
+            let hash = content.content_hash();
+            *self.pending_clipboard.lock() = Some((content, hash));
             return;
         }
 
@@ -287,6 +292,8 @@ impl SyncEngine {
                     "device_name": device_name,
                     "platform": platform,
                 }));
+                // 立即广播缓存的剪贴板内容
+                self.flush_pending_clipboard();
             }
             NetworkEvent::DeviceDisconnected { device_id } => {
                 tracing::info!("设备已断开: {}", device_id);
@@ -370,6 +377,65 @@ impl SyncEngine {
             DiscoveryEvent::DeviceLost(_device_id) => {
                 // 连接管理器会自动处理断开
             }
+        }
+    }
+
+    // ── 内部辅助 ──────────────────────────
+
+    /// 设备首次连接时，广播缓存的剪贴板内容
+    fn flush_pending_clipboard(&self) {
+        if let Some((content, _hash)) = self.pending_clipboard.lock().take() {
+            tracing::info!("设备已连接，广播缓存的剪贴板内容");
+            let msg = match content {
+                ClipboardContent::Text(text) => Message::ClipboardText(ClipboardTextPayload {
+                    source_device_id: self.device_id.clone(),
+                    content: text,
+                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                }),
+                ClipboardContent::Image { width, height, data } => {
+                    if data.len() < LARGE_IMAGE_THRESHOLD {
+                        Message::ClipboardImage(ClipboardImagePayload {
+                            source_device_id: self.device_id.clone(),
+                            width,
+                            height,
+                            format: ImageFormat::Png,
+                            data,
+                            timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                        })
+                    } else {
+                        // 大图片走分块发送
+                        tokio::spawn({
+                            let engine_network = self.network.clone();
+                            let engine_device_id = self.device_id.clone();
+                            async move {
+                                let transfer_id = uuid::Uuid::new_v4().to_string();
+                                let total_chunks =
+                                    ((data.len() + IMAGE_CHUNK_SIZE - 1) / IMAGE_CHUNK_SIZE)
+                                        .min(u16::MAX as usize) as u16;
+                                for i in 0..total_chunks {
+                                    let start = i as usize * IMAGE_CHUNK_SIZE;
+                                    let end = std::cmp::min(start + IMAGE_CHUNK_SIZE, data.len());
+                                    let chunk = data[start..end].to_vec();
+                                    let msg = Message::ClipboardImageChunk(ClipboardImageChunkPayload {
+                                        source_device_id: engine_device_id.clone(),
+                                        transfer_id: transfer_id.clone(),
+                                        width,
+                                        height,
+                                        total_chunks,
+                                        chunk_index: i,
+                                        data: chunk,
+                                        timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                                    });
+                                    let _ = engine_network.broadcast(&msg);
+                                }
+                            }
+                        });
+                        return;
+                    }
+                }
+                ClipboardContent::None => return,
+            };
+            let _ = self.network.broadcast(&msg);
         }
     }
 
