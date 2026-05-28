@@ -35,9 +35,8 @@ pub struct AppState {
 // ── Tauri 命令 ─────────────────────────
 
 #[tauri::command]
-async fn get_devices(_state: tauri::State<'_, AppState>) -> Result<Vec<serde_json::Value>, String> {
-    // 暂时返回空列表，后续通过 event 推送
-    Ok(vec![])
+async fn get_devices(state: tauri::State<'_, AppState>) -> Result<Vec<discovery::DiscoveredDevice>, String> {
+    Ok(state.sync_engine.get_discovered_devices())
 }
 
 #[tauri::command]

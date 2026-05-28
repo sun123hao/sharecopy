@@ -186,6 +186,11 @@ impl NetworkManager {
                         }
                     }) {
                         let (remote_device_id, remote_device_name, remote_platform) = device_info;
+                        // 防止自我连接
+                        if remote_device_id == _my_device_id {
+                            tracing::warn!("检测到自我连接，忽略");
+                            return Ok(());
+                        }
                         tracing::info!("设备握手完成: {} ({})", remote_device_name, remote_device_id);
 
                         let (send_tx, mut send_rx) =
@@ -286,6 +291,11 @@ impl NetworkManager {
 
     /// 主动连接一个发现的设备
     pub async fn connect_to_device(&self, device: &DiscoveredDevice) -> AppResult<()> {
+        // 防止连接到自身或空设备
+        if device.device_id == self.device_id || device.device_id.is_empty() {
+            tracing::debug!("跳过自身连接: device_id={}", device.device_id);
+            return Ok(());
+        }
         if self.connections.contains_key(&device.device_id) {
             return Ok(());
         }

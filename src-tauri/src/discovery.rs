@@ -6,7 +6,7 @@ use tokio::sync::broadcast;
 use crate::error::AppResult;
 
 // ── 发现的设备 ──────────────────────────────
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct DiscoveredDevice {
     pub device_id: String,
     pub device_name: String,
@@ -130,8 +130,13 @@ impl DiscoveryService {
                                 .map(|v| v.to_string())
                                 .unwrap_or_default();
 
-                            // 跳过本机
-                            if device_id == my_device_id {
+                            // 跳过本机（含 TXT 未就绪导致的空 ID）
+                            if device_id == my_device_id || device_id.is_empty() {
+                                continue;
+                            }
+
+                            // mDNS 去重：已发现的设备不重复发送事件
+                            if devices.contains_key(&device_id) {
                                 continue;
                             }
 

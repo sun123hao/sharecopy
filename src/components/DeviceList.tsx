@@ -30,10 +30,12 @@ export function DeviceList() {
   const addDevice = useAppStore((s) => s.addDevice);
   const removeDevice = useAppStore((s) => s.removeDevice);
   const loadConfig = useAppStore((s) => s.loadConfig);
+  const loadDevices = useAppStore((s) => s.loadDevices);
 
   useEffect(() => {
     loadConfig();
-  }, [loadConfig]);
+    loadDevices();
+  }, [loadConfig, loadDevices]);
 
   useDeviceOnline((device) => {
     addDevice(device as DiscoveredDevice);

@@ -392,6 +392,10 @@ impl SyncEngine {
         self.history.lock().clone()
     }
 
+    pub fn get_discovered_devices(&self) -> Vec<crate::discovery::DiscoveredDevice> {
+        self.discovery.lock().unwrap().list_devices()
+    }
+
     pub fn write_to_clipboard(&self, content: &ClipboardContent) -> crate::error::AppResult<()> {
         self.watcher.write_safely(content)
     }

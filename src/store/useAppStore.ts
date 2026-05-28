@@ -16,6 +16,7 @@ interface AppState {
 
   // Actions
   loadConfig: () => Promise<void>;
+  loadDevices: () => Promise<void>;
   setSyncEnabled: (enabled: boolean) => Promise<void>;
   updateDeviceName: (name: string) => Promise<void>;
   updateConfig: (config: AppConfig) => Promise<void>;
@@ -39,6 +40,23 @@ export const useAppStore = create<AppState>((set, get) => ({
       set({ config, syncEnabled: enabled });
     } catch (e) {
       console.error('加载配置失败:', e);
+    }
+  },
+
+  loadDevices: async () => {
+    try {
+      const devices = await commands.getDevices();
+      set((state) => {
+        // 合并已发现的设备，按 device_id 去重
+        const existingIds = new Set(state.devices.map((d) => d.device_id));
+        const newDevices = (devices as Array<{ device_id: string; [key: string]: unknown }>).filter(
+          (d) => d.device_id && !existingIds.has(d.device_id)
+        );
+        if (newDevices.length === 0) return state;
+        return { devices: [...state.devices, ...newDevices as unknown as DiscoveredDevice[]] };
+      });
+    } catch (e) {
+      console.error('加载设备列表失败:', e);
     }
   },
 
