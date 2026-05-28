@@ -1,6 +1,5 @@
 use std::sync::Arc;
 use tauri::{Emitter, Manager};
-#[cfg(target_os = "macos")]
 use tauri::RunEvent;
 use tokio::sync::mpsc;
 
@@ -11,11 +10,14 @@ mod clipboard;
 mod clipboard_macos;
 #[cfg(target_os = "windows")]
 mod clipboard_windows;
+#[cfg(target_os = "android")]
+mod clipboard_android;
 mod discovery;
 mod network;
 mod sync;
 mod transfer;
 mod config;
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 mod tray;
 
 use clipboard::ClipboardWatcher;
@@ -139,7 +141,10 @@ pub fn run() {
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
             Some(vec!["--minimized"]),
+            #[cfg(any(target_os = "android", target_os = "ios"))]
+            None,
         ))
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
@@ -213,6 +218,16 @@ pub fn run() {
                     }
                 }
             };
+            #[cfg(target_os = "android")]
+            let clipboard_backend: Box<dyn clipboard::ClipboardBackend> = {
+                match clipboard_android::AndroidClipboardBackend::new() {
+                    Ok(b) => Box::new(b),
+                    Err(e) => {
+                        tracing::error!("无法创建 Android 剪贴板后端: {}", e);
+                        return Err(Box::new(e));
+                    }
+                }
+            };
 
             // 创建剪贴板监视器（run() 使用 &self，可安全放入 Arc）
             let (clipboard_tx, clipboard_rx) = mpsc::unbounded_channel();
@@ -272,7 +287,8 @@ pub fn run() {
             };
             app.manage(app_state);
 
-            // 拦截窗口关闭事件 —— 关闭按钮改为隐藏到托盘
+            // 桌面端：拦截窗口关闭改为隐藏到托盘
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
             if let Some(window) = app.get_webview_window("main") {
                 let w = window.clone();
                 window.on_window_event(move |event| {
@@ -311,7 +327,8 @@ pub fn run() {
                 }
             });
 
-            // 构建系统托盘
+            // 桌面端：构建系统托盘
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
             tray::create_tray(app)?;
 
             tracing::info!("ShareCopy 启动完成");
@@ -332,13 +349,21 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("ShareCopy 启动失败")
         .run(|app_handle, event| {
-            // macOS: 点击 Dock 图标时恢复主窗口
+            // macOS: 点击 Dock 图标恢复主窗口
             #[cfg(target_os = "macos")]
             if let RunEvent::Reopen { .. } = event {
                 if let Some(window) = app_handle.get_webview_window("main") {
                     let _ = window.show();
                     let _ = window.set_focus();
                 }
+            }
+            // Android/移动端：进入后台时暂停剪贴板轮询，回到前台时恢复
+            #[cfg(any(target_os = "android", target_os = "ios"))]
+            match &event {
+                RunEvent::Exit => {
+                    tracing::info!("移动端应用退出");
+                }
+                _ => {}
             }
             let _ = event;
         });

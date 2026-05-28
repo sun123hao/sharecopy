@@ -13,6 +13,12 @@
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+
+  /* 移动端安全区域 */
+  --safe-area-top: env(safe-area-inset-top, 0px);
+  --safe-area-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-area-left: env(safe-area-inset-left, 0px);
+  --safe-area-right: env(safe-area-inset-right, 0px);
 }
 
 body {
@@ -53,4 +59,20 @@ body.dark,
 }
 .dark ::-webkit-scrollbar-thumb:hover {
   background: rgba(71, 85, 105, 0.7);
+}
+
+/* 移动端触控优化 */
+@media (hover: none) {
+  /* 触控设备上始终显示操作按钮 */
+  .touch-visible {
+    opacity: 1 !important;
+  }
+}
+
+/* 触控设备最小触控区域 */
+@media (pointer: coarse) {
+  .min-touch-target {
+    min-height: 44px;
+    min-width: 44px;
+  }
 }

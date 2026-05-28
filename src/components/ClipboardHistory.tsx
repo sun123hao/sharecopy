@@ -166,10 +166,10 @@ export function ClipboardHistory() {
                     </div>
                   </div>
 
-                  {/* 重新复制按钮 */}
+                  {/* 重新复制按钮（桌面端 hover 显示，触控端始终可见） */}
                   <button
                     onClick={() => handleCopy(entry)}
-                    className={`flex-shrink-0 p-1 rounded-md transition-all opacity-0 group-hover:opacity-100 ${
+                    className={`flex-shrink-0 p-1 rounded-md transition-all opacity-0 group-hover:opacity-100 touch-visible min-touch-target ${
                       copiedId === entry.id
                         ? 'bg-emerald-100 text-emerald-600'
                         : 'hover:bg-amber-50 text-slate-300 hover:text-amber-500'
