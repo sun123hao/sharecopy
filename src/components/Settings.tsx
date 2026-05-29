@@ -56,7 +56,7 @@ export function Settings({ theme, setTheme }: { theme: Theme; setTheme: (t: Them
     }
   }, [config]);
 
-  const handleDeviceNameBlur = () => {
+  const handleDeviceNameSave = () => {
     if (deviceName && deviceName !== config?.device_name) {
       updateDeviceName(deviceName);
     }
@@ -119,13 +119,22 @@ export function Settings({ theme, setTheme }: { theme: Theme; setTheme: (t: Them
       {/* 设备名称 */}
       <div>
         <label className="text-[11px] text-slate-500 dark:text-slate-400 mb-1.5 block">设备名称</label>
-        <input
-          type="text"
-          value={deviceName}
-          onChange={(e) => setDeviceName(e.target.value)}
-          onBlur={handleDeviceNameBlur}
-          className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2.5 text-sm text-slate-800 dark:text-slate-200 focus:outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-50 dark:focus:ring-amber-500/10 transition-all"
-        />
+        <div className="flex gap-2">
+          <input
+            type="text"
+            value={deviceName}
+            onChange={(e) => setDeviceName(e.target.value)}
+            className="flex-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2.5 text-sm text-slate-800 dark:text-slate-200 focus:outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-50 dark:focus:ring-amber-500/10 transition-all"
+          />
+          {deviceName !== config?.device_name && (
+            <button
+              onClick={handleDeviceNameSave}
+              className="px-3 py-2.5 rounded-xl bg-amber-500 text-white text-sm font-medium hover:bg-amber-600 transition-colors"
+            >
+              保存
+            </button>
+          )}
+        </div>
       </div>
 
       {/* 文件保存路径 */}
