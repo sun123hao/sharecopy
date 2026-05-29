@@ -23,6 +23,10 @@ android {
         targetSdk = 36
         versionCode = tauriProperties.getProperty("tauri.android.versionCode", "1").toInt()
         versionName = tauriProperties.getProperty("tauri.android.versionName", "1.0")
+        // 仅构建 arm64-v8a，减小 APK 体积（如需 32 位设备，可加 "armeabi-v7a"）
+        ndk {
+            abiFilters += listOf("arm64-v8a", "armeabi-v7a")
+        }
     }
     buildTypes {
         getByName("debug") {
@@ -38,11 +42,16 @@ android {
         }
         getByName("release") {
             isMinifyEnabled = true
+            isShrinkResources = true // 移除未使用资源
             proguardFiles(
                 *fileTree(".") { include("**/*.pro") }
                     .plus(getDefaultProguardFile("proguard-android-optimize.txt"))
                     .toList().toTypedArray()
             )
+            // 去除 native 调试符号，大幅减小 APK 体积
+            packaging {
+                jniLibs.keepDebugSymbols.clear()
+            }
         }
     }
     kotlinOptions {

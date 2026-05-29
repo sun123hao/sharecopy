@@ -37,7 +37,7 @@ pub enum TransferState {
 
 // ── 进行中的传输（接收端）────────────────────
 struct IncomingTransfer {
-    transfer_id: String,
+    _transfer_id: String,
     file_name: String,
     file_size: u64,
     total_chunks: u32,
@@ -181,7 +181,7 @@ impl FileTransferManager {
     /// 处理文件传输请求
     pub fn handle_file_request(&self, payload: &FileTransferReqPayload) {
         let transfer = IncomingTransfer {
-            transfer_id: payload.transfer_id.clone(),
+            _transfer_id: payload.transfer_id.clone(),
             file_name: payload.file_name.clone(),
             file_size: payload.file_size,
             total_chunks: payload.total_chunks,

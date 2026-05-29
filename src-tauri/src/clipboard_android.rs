@@ -6,7 +6,7 @@
 use jni::objects::{GlobalRef, JObject, JValue};
 use jni::JavaVM;
 use sha2::{Digest, Sha256};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64};
 
 use crate::clipboard::{ClipboardBackend, ClipboardContent};
 use crate::error::AppResult;
@@ -56,7 +56,7 @@ impl AndroidClipboardBackend {
 }
 
 // JVM 原始指针（JNI_OnLoad 中缓存），存为 usize 绕过 Send/Sync 限制
-static GLOBAL_JVM_PTR: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+pub(crate) static GLOBAL_JVM_PTR: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
 /// JNI 加载时由 Android 系统自动调用
 #[no_mangle]

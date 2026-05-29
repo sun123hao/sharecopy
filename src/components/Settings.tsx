@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { FolderOpen, Sun, Moon, Monitor } from 'lucide-react';
 import { useAppStore } from '../store/useAppStore';
+import { isMobile } from '../hooks/usePlatform';
 
 type Theme = 'system' | 'light' | 'dark';
 
@@ -113,7 +114,8 @@ export function Settings({ theme, setTheme }: { theme: Theme; setTheme: (t: Them
         />
       </div>
 
-      {/* 文件保存路径 */}
+      {/* 文件保存路径（桌面端专属） */}
+      {!isMobile() && (
       <div>
         <label className="text-[11px] text-slate-500 dark:text-slate-400 mb-1.5 block">文件保存路径</label>
         <div className="flex gap-2">
@@ -131,6 +133,7 @@ export function Settings({ theme, setTheme }: { theme: Theme; setTheme: (t: Them
           </button>
         </div>
       </div>
+      )}
 
       {/* 主题选择 */}
       <div>
@@ -173,7 +176,8 @@ export function Settings({ theme, setTheme }: { theme: Theme; setTheme: (t: Them
           <Toggle checked={syncEnabled} onChange={() => setSyncEnabled(!syncEnabled)} />
         </button>
 
-        {/* 开机自启 */}
+        {/* 开机自启（桌面端专属） */}
+        {!isMobile() && (
         <button
           onClick={handleToggleAutoStart}
           className="w-full flex items-center justify-between p-3.5 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors border-b border-slate-100 dark:border-slate-700"
@@ -186,8 +190,10 @@ export function Settings({ theme, setTheme }: { theme: Theme; setTheme: (t: Them
           </div>
           <Toggle checked={autoStart} onChange={handleToggleAutoStart} />
         </button>
+        )}
 
-        {/* 自动接收 */}
+        {/* 自动接收（桌面端专属） */}
+        {!isMobile() && (
         <button
           onClick={handleToggleAutoAccept}
           className="w-full flex items-center justify-between p-3.5 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors"
@@ -200,6 +206,7 @@ export function Settings({ theme, setTheme }: { theme: Theme; setTheme: (t: Them
           </div>
           <Toggle checked={autoAccept} onChange={handleToggleAutoAccept} />
         </button>
+        )}
       </div>
 
       {/* 同步统计 */}

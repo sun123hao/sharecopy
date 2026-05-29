@@ -40,6 +40,7 @@ pub struct NetworkManager {
     last_activity: Arc<DashMap<String, Instant>>,
     event_tx: mpsc::UnboundedSender<NetworkEvent>,
     running: Arc<AtomicBool>,
+    #[allow(dead_code)]
     discovery_devices: Arc<DashMap<String, DiscoveredDevice>>,
 }
 

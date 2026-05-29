@@ -12,6 +12,8 @@ mod clipboard_macos;
 mod clipboard_windows;
 #[cfg(target_os = "android")]
 mod clipboard_android;
+#[cfg(target_os = "android")]
+mod android_network;
 mod discovery;
 mod network;
 mod sync;
@@ -162,14 +164,31 @@ pub fn run() {
             tracing::info!("ShareCopy 启动中...");
 
             // 加载配置
-            let app_config = AppConfig::load().unwrap_or_default();
+            let mut app_config = AppConfig::load().unwrap_or_default();
             let device_id = app_config.device_id.clone();
-            let device_name = app_config.device_name.clone();
+            let _device_name = app_config.device_name.clone();
             let tcp_port = app_config.tcp_port;
             let save_dir = app_config.save_dir.clone();
 
             // 获取本机信息
+            // Android: 用 JNI 获取设备型号覆盖默认名称（hostname crate 在 Android 不可靠）
+            #[cfg(target_os = "android")]
+            let android_device_name = android_network::get_device_model().ok();
+            #[cfg(target_os = "android")]
+            if let Some(ref name) = android_device_name {
+                if !name.is_empty() {
+                    app_config.device_name = name.clone();
+                }
+            }
+            let device_name = app_config.device_name.clone();
+
             let hostname = {
+                #[cfg(target_os = "android")]
+                let h = {
+                    // Android 上使用设备 ID 构建唯一 hostname
+                    format!("android-{}.local.", &device_id[..std::cmp::min(8, device_id.len())])
+                };
+                #[cfg(not(target_os = "android"))]
                 let h = hostname::get()
                     .unwrap_or_default()
                     .to_string_lossy()
@@ -241,12 +260,21 @@ pub fn run() {
             ));
 
             // 创建设备发现服务
-            let mut discovery_service = match DiscoveryService::new(
+            // Android: 通过 JNI 获取 WiFi IP，if_addrs crate 在 Android 上不可靠
+            #[cfg(target_os = "android")]
+            let my_ip = android_network::get_wifi_ip()
+                .ok()
+                .and_then(|ip| ip.parse::<std::net::IpAddr>().ok());
+            #[cfg(not(target_os = "android"))]
+            let my_ip: Option<std::net::IpAddr> = None;
+
+            let mut discovery_service = match DiscoveryService::new_with_ip(
                 device_id.clone(),
                 device_name.clone(),
                 hostname,
                 platform,
                 tcp_port,
+                my_ip,
             ) {
                 Ok(s) => s,
                 Err(e) => {
@@ -350,7 +378,7 @@ pub fn run() {
         ])
         .build(tauri::generate_context!())
         .expect("ShareCopy 启动失败")
-        .run(|app_handle, event| {
+        .run(|_app_handle, event| {
             // macOS: 点击 Dock 图标恢复主窗口
             #[cfg(target_os = "macos")]
             if let RunEvent::Reopen { .. } = event {

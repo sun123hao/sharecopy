@@ -37,6 +37,8 @@ pub struct DiscoveryService {
     hostname: String,
     platform: String,
     tcp_port: u16,
+    /// 手动指定的本机 IP（Android 上通过 JNI 获取）
+    my_ip: Option<std::net::IpAddr>,
 }
 
 impl DiscoveryService {
@@ -46,6 +48,18 @@ impl DiscoveryService {
         hostname: String,
         platform: String,
         tcp_port: u16,
+    ) -> AppResult<Self> {
+        Self::new_with_ip(device_id, device_name, hostname, platform, tcp_port, None)
+    }
+
+    /// 创建服务并指定本机 IP（Android 上通过 JNI 获取 WiFi IP）
+    pub fn new_with_ip(
+        device_id: String,
+        device_name: String,
+        hostname: String,
+        platform: String,
+        tcp_port: u16,
+        my_ip: Option<std::net::IpAddr>,
     ) -> AppResult<Self> {
         let mdns = ServiceDaemon::new()
             .map_err(|e| crate::error::AppError::Discovery(format!("创建 mDNS 服务失败: {}", e)))?;
@@ -62,6 +76,7 @@ impl DiscoveryService {
             hostname,
             platform,
             tcp_port,
+            my_ip,
         })
     }
 
@@ -75,16 +90,18 @@ impl DiscoveryService {
             ("tcp_port", &self.tcp_port.to_string()),
         ];
 
-        // 获取本机 IP
-        let my_ip = if_addrs::get_if_addrs()
-            .ok()
-            .and_then(|ifaces| {
-                ifaces
-                    .into_iter()
-                    .find(|i| !i.is_loopback() && matches!(i.addr, if_addrs::IfAddr::V4(_)))
-                    .map(|i| i.ip())
-            })
-            .unwrap_or_else(|| std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST));
+        // 获取本机 IP（优先使用手动指定的 IP，Android 上通过 JNI 获取）
+        let my_ip = self.my_ip.unwrap_or_else(|| {
+            if_addrs::get_if_addrs()
+                .ok()
+                .and_then(|ifaces| {
+                    ifaces
+                        .into_iter()
+                        .find(|i| !i.is_loopback() && matches!(i.addr, if_addrs::IfAddr::V4(_)))
+                        .map(|i| i.ip())
+                })
+                .unwrap_or_else(|| std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST))
+        });
 
         let service_info = ServiceInfo::new(
             SERVICE_TYPE,
