@@ -57,6 +57,7 @@ async fn update_device_name(
 ) -> Result<(), String> {
     let mut config = state.config.write().await;
     config.device_name = name.clone();
+    config.name_customized = true; // 标记为用户自定义，防止 Android 覆盖
     config.save().map_err(|e| e.to_string())?;
     // 通知同步引擎更新设备名（重新注册 mDNS）
     state.sync_engine.update_device_name(&name);
@@ -232,13 +233,14 @@ pub fn run() {
             // ── 获取本机信息（Android 上在 JVM 就绪后通过 JNI 获取） ──
             #[cfg(target_os = "android")]
             {
-                // 仅在用户未自定义名称时（仍为 localhost/空），用 Build.MODEL 填充
-                if app_config.device_name.is_empty() || app_config.device_name == "localhost" {
+                // 仅在用户从未自定义名称时，用 Build.MODEL 填充
+                if !app_config.name_customized
+                    && (app_config.device_name.is_empty() || app_config.device_name == "localhost")
+                {
                     match android_network::get_device_model() {
                         Ok(name) if !name.is_empty() => {
                             tracing::info!("Android 设备型号: {}", name);
                             app_config.device_name = name;
-                            // 持久化默认名称
                             let _ = app_config.save();
                         }
                         Ok(_) => tracing::warn!("Android 设备型号为空"),

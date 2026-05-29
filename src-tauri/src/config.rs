@@ -7,6 +7,9 @@ use crate::error::AppResult;
 pub struct AppConfig {
     /// 设备显示别名
     pub device_name: String,
+    /// 用户是否自定义过设备名（防止 Android 自动覆盖）
+    #[serde(default)]
+    pub name_customized: bool,
     /// 本机唯一标识（首次启动生成 UUID v4）
     pub device_id: String,
     /// TCP 通信端口
@@ -27,6 +30,7 @@ pub struct AppConfig {
 impl Default for AppConfig {
     fn default() -> Self {
         Self {
+            name_customized: false,
             device_name: hostname::get()
                 .unwrap_or_default()
                 .to_string_lossy()
