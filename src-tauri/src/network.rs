@@ -2,7 +2,7 @@ use dashmap::DashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
-use tokio::io::AsyncWriteExt;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc;
 
@@ -13,6 +13,8 @@ use crate::protocol::{FrameDecoder, HeartbeatPayload, Message};
 // ── 心跳常量 ──────────────────────────────
 pub const HEARTBEAT_INTERVAL_SECS: u64 = 10;
 pub const HEARTBEAT_TIMEOUT_SECS: u64 = 30;
+/// TCP 写入超时：如果 5 秒内无法完成写入，认为连接已断开
+pub const WRITE_TIMEOUT_SECS: u64 = 5;
 
 // ── 网络事件 ──────────────────────────────
 #[derive(Debug, Clone)]
@@ -105,7 +107,9 @@ impl NetworkManager {
                 });
                 let Ok(encoded) = ping.encode() else { continue };
                 for entry in hb_conns.iter() {
-                    let _ = entry.value().send(encoded.clone());
+                    if let Err(e) = entry.value().send(encoded.clone()) {
+                        tracing::debug!("心跳 Ping 发送失败 (设备 {} 通道已关闭): {:?}", entry.key(), e);
+                    }
                 }
             }
         });
@@ -131,9 +135,11 @@ impl NetworkManager {
                     timeout_conns.remove(&id);
                     timeout_activity.remove(&id);
                     timeout_notified.remove(&id);
-                    let _ = timeout_event.send(NetworkEvent::DeviceDisconnected {
+                    if let Err(e) = timeout_event.send(NetworkEvent::DeviceDisconnected {
                         device_id: id,
-                    });
+                    }) {
+                        tracing::warn!("发送心跳超时断开事件失败: {:?}", e);
+                    }
                 }
             }
         });
@@ -170,20 +176,19 @@ impl NetworkManager {
     }
 
     async fn handle_connection(
-        stream: TcpStream,
+        mut stream: TcpStream,
         _my_device_id: String,
         connections: Arc<DashMap<String, tokio::sync::mpsc::UnboundedSender<Vec<u8>>>>,
         event_tx: mpsc::UnboundedSender<NetworkEvent>,
         last_activity: Arc<DashMap<String, Instant>>,
         notified: Arc<DashMap<String, ()>>,
     ) -> AppResult<()> {
-        // 等待握手消息
+        // 等待握手消息（用 read().await，完整 TcpStream 无 split 问题）
         let mut decoder = FrameDecoder::new();
         let mut buf = vec![0u8; 65536];
 
-        // 尝试读取
         loop {
-            match stream.try_read(&mut buf) {
+            match stream.read(&mut buf).await {
                 Ok(0) => return Err(AppError::Protocol("连接关闭".into())),
                 Ok(n) => {
                     let messages = decoder.feed(&buf[..n]);
@@ -217,29 +222,56 @@ impl NetworkManager {
 
                         // 仅首次连接时通知前端
                         if notified.insert(remote_device_id.clone(), ()).is_none() {
-                            let _ = event_tx.send(NetworkEvent::DeviceConnected {
+                            if let Err(e) = event_tx.send(NetworkEvent::DeviceConnected {
                                 device_name: remote_device_name,
                                 device_id: remote_device_id.clone(),
                                 platform: remote_platform,
-                            });
+                            }) {
+                                tracing::warn!("发送 DeviceConnected 事件失败: {:?}", e);
+                            }
                         }
 
-                        // 启动写入任务
-                        let (read_half, mut write_half) = stream.into_split();
+                        // 启动读写（tokio::io::split 用 Mutex 协调 reactor，read() 安全）
+                        let (mut read_half, mut write_half) = tokio::io::split(stream);
+
+                        // oneshot 通道：写任务退出时通知读循环立即清理，避免半死连接
+                        let (write_done_tx, mut write_done_rx) =
+                            tokio::sync::oneshot::channel::<()>();
 
                         let write_handle = {
                             let remote_id = remote_device_id.clone();
                             tokio::spawn(async move {
                                 while let Some(data) = send_rx.recv().await {
-                                    if let Err(e) = write_half.write_all(&data).await {
-                                        tracing::error!("写入 {} 失败: {}", remote_id, e);
-                                        break;
+                                    // 写入带超时：TCP 重传超时可能长达 1-2 分钟，
+                                    // 用 tokio::time::timeout 在 5 秒内检测到死连接
+                                    match tokio::time::timeout(
+                                        tokio::time::Duration::from_secs(WRITE_TIMEOUT_SECS),
+                                        write_half.write_all(&data),
+                                    )
+                                    .await
+                                    {
+                                        Ok(Ok(())) => {} // 写入成功
+                                        Ok(Err(e)) => {
+                                            tracing::error!("写入 {} 失败: {}", remote_id, e);
+                                            break;
+                                        }
+                                        Err(_elapsed) => {
+                                            tracing::warn!(
+                                                "写入 {} 超时 ({}s)，连接可能已断开",
+                                                remote_id,
+                                                WRITE_TIMEOUT_SECS
+                                            );
+                                            break;
+                                        }
                                     }
                                 }
+                                // 写任务退出时通知读循环（无论原因：超时、错误、通道关闭）
+                                let _ = write_done_tx.send(());
                             })
                         };
 
-                        // 读取循环
+                        // 读取循环（read().await 由 reactor 唤醒，无轮询延迟）
+                        // tokio::select! 同时等待数据到达和写任务退出信号
                         let mut decoder2 = FrameDecoder::new();
                         let mut buf2 = vec![0u8; 65536];
                         let act = last_activity.clone();
@@ -248,42 +280,56 @@ impl NetworkManager {
                         let my_id = _my_device_id.clone();
 
                         loop {
-                            match read_half.try_read(&mut buf2) {
-                                Ok(0) => break,
-                                Ok(n) => {
-                                    let msgs = decoder2.feed(&buf2[..n]);
-                                    for msg in msgs {
-                                        match &msg {
-                                            Message::HeartbeatPing(_) | Message::HeartbeatPong(_) => {
-                                                act.insert(remote_rid.clone(), Instant::now());
-                                            }
-                                            _ => {}
-                                        }
-                                        // 收到 Ping 自动回复 Pong
-                                        if matches!(&msg, Message::HeartbeatPing(_)) {
-                                            let pong = Message::HeartbeatPong(HeartbeatPayload {
-                                                device_id: my_id.clone(),
-                                                timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                                            });
-                                            if let Ok(encoded) = pong.encode() {
-                                                if let Some(tx) = send_for_pong.get(&remote_rid) {
-                                                    let _ = tx.send(encoded);
+                            tokio::select! {
+                                result = read_half.read(&mut buf2) => {
+                                    match result {
+                                        Ok(0) => break,
+                                        Ok(n) => {
+                                            let msgs = decoder2.feed(&buf2[..n]);
+                                            for msg in msgs {
+                                                match &msg {
+                                                    Message::HeartbeatPing(_) | Message::HeartbeatPong(_) => {
+                                                        act.insert(remote_rid.clone(), Instant::now());
+                                                    }
+                                                    _ => {}
+                                                }
+                                                // 收到 Ping 自动回复 Pong
+                                                if matches!(&msg, Message::HeartbeatPing(_)) {
+                                                    let pong = Message::HeartbeatPong(HeartbeatPayload {
+                                                        device_id: my_id.clone(),
+                                                        timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                                                    });
+                                                    if let Ok(encoded) = pong.encode() {
+                                                        if let Some(tx) = send_for_pong.get(&remote_rid) {
+                                                            if tx.send(encoded).is_err() {
+                                                                tracing::debug!("Pong 发送失败: 通道已关闭");
+                                                            }
+                                                        }
+                                                    }
+                                                    continue; // Ping 不需要转发到 SyncEngine
+                                                }
+                                                if let Err(e) = event_tx.send(NetworkEvent::MessageReceived {
+                                                    from_device_id: remote_device_id.clone(),
+                                                    message: msg,
+                                                }) {
+                                                    tracing::warn!("发送 MessageReceived 事件失败: {:?}", e);
                                                 }
                                             }
-                                            continue; // Ping 不需要转发到 SyncEngine
                                         }
-                                        let _ = event_tx.send(NetworkEvent::MessageReceived {
-                                            from_device_id: remote_device_id.clone(),
-                                            message: msg,
-                                        });
+                                        Err(e) => {
+                                            tracing::error!("读取 {} 错误: {}", remote_device_id, e);
+                                            break;
+                                        }
                                     }
                                 }
-                                Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                                    tokio::time::sleep(tokio::time::Duration::from_millis(100))
-                                        .await;
-                                    continue;
+                                _ = &mut write_done_rx => {
+                                    // 写任务先于读循环退出 → 连接已半死，立即清理
+                                    tracing::warn!(
+                                        "写入任务已退出 (超时/错误)，主动断开 {}",
+                                        remote_device_id
+                                    );
+                                    break;
                                 }
-                                Err(_) => break,
                             }
                         }
 
@@ -291,18 +337,16 @@ impl NetworkManager {
                         connections.remove(&remote_device_id);
                         last_activity.remove(&remote_device_id);
                         notified.remove(&remote_device_id);
-                        let _ = event_tx.send(NetworkEvent::DeviceDisconnected {
+                        if let Err(e) = event_tx.send(NetworkEvent::DeviceDisconnected {
                             device_id: remote_device_id.clone(),
-                        });
+                        }) {
+                            tracing::warn!("发送 DeviceDisconnected 事件失败 (handle_connection): {:?}", e);
+                        }
                         write_handle.abort();
 
                         tracing::info!("设备断开: {}", remote_device_id);
                         return Ok(());
                     }
-                }
-                Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-                    continue;
                 }
                 Err(e) => return Err(AppError::Network(e)),
             }
@@ -367,15 +411,17 @@ impl NetworkManager {
 
         // 仅首次连接时通知前端（防止双向连接重复通知）
         if self.notified.insert(device.device_id.clone(), ()).is_none() {
-            let _ = self.event_tx.send(NetworkEvent::DeviceConnected {
+            if let Err(e) = self.event_tx.send(NetworkEvent::DeviceConnected {
                 device_name: device.device_name.clone(),
                 device_id: device.device_id.clone(),
                 platform: device.platform.clone(),
-            });
+            }) {
+                tracing::warn!("发送 DeviceConnected 事件失败 (connect): {:?}", e);
+            }
         }
 
-        // 后台任务处理读写
-        let (read_half, mut write_half) = stream.into_split();
+        // 后台任务处理读写（tokio::io::split 用 Mutex 协调 reactor，read() 安全）
+        let (mut read_half, mut write_half) = tokio::io::split(stream);
         let conns = self.connections.clone();
         let evt = self.event_tx.clone();
         let remote_id = device.device_id.clone();
@@ -384,52 +430,92 @@ impl NetworkManager {
         let my_id = self.device_id.clone();
 
         tokio::spawn(async move {
-            // 写入任务
+            // oneshot 通道：写任务退出时通知读循环立即清理
+            let (write_done_tx, mut write_done_rx) =
+                tokio::sync::oneshot::channel::<()>();
+
+            // 写入任务（需克隆 remote_id 供日志使用）
+            let write_remote_id = remote_id.clone();
             let write_task = tokio::spawn(async move {
                 while let Some(data) = send_rx.recv().await {
-                    if write_half.write_all(&data).await.is_err() {
-                        break;
+                    // 写入带超时，避免 TCP 重传阻塞整个同步管道
+                    match tokio::time::timeout(
+                        tokio::time::Duration::from_secs(WRITE_TIMEOUT_SECS),
+                        write_half.write_all(&data),
+                    )
+                    .await
+                    {
+                        Ok(Ok(())) => {} // 写入成功
+                        Ok(Err(e)) => {
+                            tracing::error!("写入 {} 失败 (connect): {}", write_remote_id, e);
+                            break;
+                        }
+                        Err(_elapsed) => {
+                            tracing::warn!(
+                                "写入 {} 超时 ({}s, connect)，连接可能已断开",
+                                write_remote_id,
+                                WRITE_TIMEOUT_SECS
+                            );
+                            break;
+                        }
                     }
                 }
+                // 写任务退出时通知读循环（无论原因）
+                let _ = write_done_tx.send(());
             });
 
-            // 读取
+            // 读取（read().await + select 检测写任务退出）
             let mut decoder = FrameDecoder::new();
             let mut buf = vec![0u8; 65536];
             loop {
-                match read_half.try_read(&mut buf) {
-                    Ok(0) => break,
-                    Ok(n) => {
-                        for msg in decoder.feed(&buf[..n]) {
-                            match &msg {
-                                Message::HeartbeatPing(_) | Message::HeartbeatPong(_) => {
-                                    act.insert(remote_id.clone(), Instant::now());
-                                }
-                                _ => {}
-                            }
-                            if matches!(&msg, Message::HeartbeatPing(_)) {
-                                let pong = Message::HeartbeatPong(HeartbeatPayload {
-                                    device_id: my_id.clone(),
-                                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                                });
-                                if let Ok(encoded) = pong.encode() {
-                                    if let Some(tx) = conns.get(&remote_id) {
-                                        let _ = tx.send(encoded);
+                tokio::select! {
+                    result = read_half.read(&mut buf) => {
+                        match result {
+                            Ok(0) => break,
+                            Ok(n) => {
+                                for msg in decoder.feed(&buf[..n]) {
+                                    match &msg {
+                                        Message::HeartbeatPing(_) | Message::HeartbeatPong(_) => {
+                                            act.insert(remote_id.clone(), Instant::now());
+                                        }
+                                        _ => {}
+                                    }
+                                    if matches!(&msg, Message::HeartbeatPing(_)) {
+                                        let pong = Message::HeartbeatPong(HeartbeatPayload {
+                                            device_id: my_id.clone(),
+                                            timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                                        });
+                                        if let Ok(encoded) = pong.encode() {
+                                            if let Some(tx) = conns.get(&remote_id) {
+                                                if tx.send(encoded).is_err() {
+                                                    tracing::debug!("Pong 发送失败 (connect): 通道已关闭");
+                                                }
+                                            }
+                                        }
+                                        continue;
+                                    }
+                                    if let Err(e) = evt.send(NetworkEvent::MessageReceived {
+                                        from_device_id: remote_id.clone(),
+                                        message: msg,
+                                    }) {
+                                        tracing::warn!("发送 MessageReceived 事件失败 (connect): {:?}", e);
                                     }
                                 }
-                                continue;
                             }
-                            let _ = evt.send(NetworkEvent::MessageReceived {
-                                from_device_id: remote_id.clone(),
-                                message: msg,
-                            });
+                            Err(e) => {
+                                tracing::error!("读取 {} 错误 (connect): {}", remote_id, e);
+                                break;
+                            }
                         }
                     }
-                    Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-                        continue;
+                    _ = &mut write_done_rx => {
+                        // 写任务先于读循环退出 → 立即清理
+                        tracing::warn!(
+                            "写入任务已退出 (connect)，主动断开 {}",
+                            remote_id
+                        );
+                        break;
                     }
-                    Err(_) => break,
                 }
             }
 
@@ -437,9 +523,11 @@ impl NetworkManager {
             conns.remove(&remote_id);
             act.remove(&remote_id);
             ntfy.remove(&remote_id);
-            let _ = evt.send(NetworkEvent::DeviceDisconnected {
+            if let Err(e) = evt.send(NetworkEvent::DeviceDisconnected {
                 device_id: remote_id.clone(),
-            });
+            }) {
+                tracing::warn!("发送 DeviceDisconnected 事件失败 (connect): {:?}", e);
+            }
         });
 
         Ok(())
@@ -459,12 +547,34 @@ impl NetworkManager {
     }
 
     /// 广播消息到所有已连接设备
+    /// 至少有一个设备发送成功时返回 Ok，全部失败时返回 Err
     pub fn broadcast(&self, message: &Message) -> AppResult<()> {
-        let encoded = message.encode()?;
-        for entry in self.connections.iter() {
-            let _ = entry.value().send(encoded.clone());
+        let total = self.connections.len();
+        if total == 0 {
+            return Ok(()); // 无连接设备，不是错误
         }
-        Ok(())
+        let encoded = message.encode()?;
+        let mut success_count = 0u32;
+        for entry in self.connections.iter() {
+            match entry.value().send(encoded.clone()) {
+                Ok(()) => success_count += 1,
+                Err(e) => {
+                    tracing::debug!(
+                        "广播发送失败 (设备 {} 通道已关闭): {:?}",
+                        entry.key(),
+                        e
+                    );
+                }
+            }
+        }
+        if success_count == 0 {
+            Err(AppError::Network(std::io::Error::new(
+                std::io::ErrorKind::NotConnected,
+                format!("广播失败: {} 个设备全部无法送达", total),
+            )))
+        } else {
+            Ok(())
+        }
     }
 
     /// 获取已连接设备数

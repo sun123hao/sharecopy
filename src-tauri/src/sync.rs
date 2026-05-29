@@ -203,12 +203,18 @@ impl SyncEngine {
             ClipboardContent::None => return,
         };
 
-        let _ = self.network.broadcast(&msg);
         // 广播成功后递增统计
-        if is_text {
-            self.stats.lock().texts_synced += 1;
-        } else if is_image {
-            self.stats.lock().images_synced += 1;
+        match self.network.broadcast(&msg) {
+            Ok(()) => {
+                if is_text {
+                    self.stats.lock().texts_synced += 1;
+                } else if is_image {
+                    self.stats.lock().images_synced += 1;
+                }
+            }
+            Err(e) => {
+                tracing::error!("广播剪贴板内容失败: {}", e);
+            }
         }
     }
 
@@ -234,7 +240,9 @@ impl SyncEngine {
                 timestamp: chrono::Utc::now().timestamp_millis() as u64,
             });
 
-            let _ = self.network.broadcast(&msg);
+            if let Err(e) = self.network.broadcast(&msg) {
+                tracing::error!("广播图片块 {}/{} 失败: {}", i, total_chunks, e);
+            }
         }
     }
 
@@ -251,7 +259,9 @@ impl SyncEngine {
                     // 记录到历史
                     self.add_history_entry("text", &payload.content, src_id);
                     let content = ClipboardContent::Text(payload.content);
-                    let _ = self.watcher.write_safely(&content);
+                    if let Err(e) = self.watcher.write_safely(&content) {
+                        tracing::error!("写入远端文本到剪贴板失败: {}", e);
+                    }
                     let _ = self.app_handle.emit("clipboard-updated", &serde_json::json!({"type": "text"}));
                 }
                 Message::ClipboardImage(payload) => {
@@ -266,7 +276,9 @@ impl SyncEngine {
                         height: payload.height,
                         data: payload.data,
                     };
-                    let _ = self.watcher.write_safely(&content);
+                    if let Err(e) = self.watcher.write_safely(&content) {
+                        tracing::error!("写入远端图片到剪贴板失败: {}", e);
+                    }
                     let _ = self.app_handle.emit("clipboard-updated", &serde_json::json!({"type": "image"}));
                 }
                 Message::ClipboardImageChunk(payload) => {
@@ -287,17 +299,21 @@ impl SyncEngine {
             },
             NetworkEvent::DeviceConnected { device_name, device_id, platform } => {
                 tracing::info!("设备已连接: {} ({})", device_name, device_id);
-                let _ = self.app_handle.emit("device-online", &serde_json::json!({
+                if let Err(e) = self.app_handle.emit("device-online", &serde_json::json!({
                     "device_id": device_id,
                     "device_name": device_name,
                     "platform": platform,
-                }));
+                })) {
+                    tracing::error!("发送 device-online 事件失败: {}", e);
+                }
                 // 立即广播缓存的剪贴板内容
                 self.flush_pending_clipboard();
             }
             NetworkEvent::DeviceDisconnected { device_id } => {
                 tracing::info!("设备已断开: {}", device_id);
-                let _ = self.app_handle.emit("device-offline", &device_id);
+                if let Err(e) = self.app_handle.emit("device-offline", &device_id) {
+                    tracing::error!("发送 device-offline 事件失败: {}", e);
+                }
             }
         }
     }
@@ -332,7 +348,9 @@ impl SyncEngine {
                     data: content,
                 };
 
-                let _ = self.watcher.write_safely(&clipboard_content);
+                if let Err(e) = self.watcher.write_safely(&clipboard_content) {
+                    tracing::error!("写入远端图片块(已有组装器)到剪贴板失败: {}", e);
+                }
                 let _ = self.app_handle.emit("clipboard-updated", &serde_json::json!({"type": "image"}));
 
                 // 移除组装器
@@ -355,7 +373,9 @@ impl SyncEngine {
                     let b64 = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, data);
                     self.add_history_entry("image", &b64, &payload.source_device_id);
                 }
-                let _ = self.watcher.write_safely(&content);
+                if let Err(e) = self.watcher.write_safely(&content) {
+                    tracing::error!("写入远端图片块(新组装器)到剪贴板失败: {}", e);
+                }
                 let _ = self.app_handle.emit("clipboard-updated", &serde_json::json!({"type": "image"}));
             } else {
                 assemblers.push(assembler);
@@ -432,7 +452,12 @@ impl SyncEngine {
                                         data: chunk,
                                         timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                     });
-                                    let _ = engine_network.broadcast(&msg);
+                                    if let Err(e) = engine_network.broadcast(&msg) {
+                                        tracing::error!(
+                                            "广播缓存图片块 {}/{} 失败: {}",
+                                            i, total_chunks, e
+                                        );
+                                    }
                                 }
                             }
                         });
@@ -441,7 +466,9 @@ impl SyncEngine {
                 }
                 ClipboardContent::None => return,
             };
-            let _ = self.network.broadcast(&msg);
+            if let Err(e) = self.network.broadcast(&msg) {
+                tracing::error!("广播缓存的剪贴板内容失败: {}", e);
+            }
         }
     }
 
@@ -459,7 +486,9 @@ impl SyncEngine {
     /// 更新本机设备名并重新注册 mDNS
     pub fn update_device_name(&self, name: &str) {
         if let Ok(mut discovery) = self.discovery.lock() {
-            let _ = discovery.stop(); // 取消旧注册
+            if let Err(e) = discovery.stop() {
+                tracing::warn!("取消旧 mDNS 注册失败: {}", e);
+            }
             discovery.set_device_name(name.to_string());
             if let Err(e) = discovery.start() {
                 tracing::warn!("mDNS 重新注册失败: {}", e);

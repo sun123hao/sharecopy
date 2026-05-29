@@ -145,17 +145,32 @@ impl ClipboardWatcher {
         self.paused.store(false, Ordering::Relaxed);
     }
 
-    /// 写入剪贴板并临时暂停（防乒乓核心机制）
+    /// 写入剪贴板（防乒乓核心机制）
+    ///
+    /// 关键设计：
+    /// 1. 先更新 last_content_hash（写入前），消除"写入完成 → 轮询器读到新内容 →
+    ///    哈希不匹配"的竞态窗口
+    /// 2. 暂停轮询器 → 写入 → 更新 change_count → 恢复轮询器
+    /// 3. 写入失败时回滚哈希，避免下次正常变更被误跳过
     pub fn write_safely(&self, content: &ClipboardContent) -> AppResult<()> {
+        // 一次加锁完成"取出旧值+写入新值"，成功路径省掉 clone
+        let original_hash = self.last_content_hash.lock().replace(content.content_hash());
+
+        // 暂停轮询器，避免在本方法执行期间触发多余的 change_count 检测
         self.pause();
         let result = self.backend.write(content);
-        // 更新内部状态，防止轮询重新检测到刚写入的内容
         if result.is_ok() {
-            *self.last_content_hash.lock() = Some(content.content_hash());
-            // 尝试更新 change_count，避免因时间窗口导致的 race
+            // 写入后同步 change_count，确保下次轮询不会因本次写入而触发
             if let Ok(cc) = self.backend.change_count() {
                 self.last_change_count.store(cc, Ordering::Relaxed);
             }
+        } else {
+            // 写入失败时恢复原始哈希，避免本机剪贴板内容被误判为新内容广播
+            tracing::warn!(
+                "剪贴板写入失败: {}，恢复原始哈希",
+                result.as_ref().unwrap_err()
+            );
+            *self.last_content_hash.lock() = original_hash;
         }
         self.resume();
         result
