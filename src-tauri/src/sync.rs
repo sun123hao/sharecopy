@@ -450,6 +450,19 @@ impl SyncEngine {
         self.sync_enabled.load(Ordering::Relaxed)
     }
 
+    /// 更新本机设备名并重新注册 mDNS
+    pub fn update_device_name(&self, name: &str) {
+        if let Ok(mut discovery) = self.discovery.lock() {
+            let _ = discovery.stop(); // 取消旧注册
+            discovery.set_device_name(name.to_string());
+            if let Err(e) = discovery.start() {
+                tracing::warn!("mDNS 重新注册失败: {}", e);
+            } else {
+                tracing::info!("设备名已更新并重新注册 mDNS: {}", name);
+            }
+        }
+    }
+
     pub fn get_stats(&self) -> SyncStats {
         self.stats.lock().clone()
     }

@@ -56,8 +56,11 @@ async fn update_device_name(
     name: String,
 ) -> Result<(), String> {
     let mut config = state.config.write().await;
-    config.device_name = name;
-    config.save().map_err(|e| e.to_string())
+    config.device_name = name.clone();
+    config.save().map_err(|e| e.to_string())?;
+    // 通知同步引擎更新设备名（重新注册 mDNS）
+    state.sync_engine.update_device_name(&name);
+    Ok(())
 }
 
 #[tauri::command]
@@ -262,6 +265,21 @@ pub fn run() {
                     format!("{}.local.", h.trim_end_matches('.'))
                 }
             };
+
+            // Android: 用 JNI 获取外部文件目录作为默认保存路径
+            #[cfg(target_os = "android")]
+            {
+                let default_save = android_file::get_default_save_dir();
+                match default_save {
+                    Ok(dir) => {
+                        if std::fs::create_dir_all(&dir).is_ok() {
+                            tracing::info!("Android 默认保存路径: {}", dir.display());
+                            app_config.save_dir = dir;
+                        }
+                    }
+                    Err(e) => tracing::warn!("获取 Android 保存目录失败: {}", e),
+                }
+            }
 
             tracing::info!("设备: {} ({}), 端口: {}", device_name, platform, tcp_port);
 

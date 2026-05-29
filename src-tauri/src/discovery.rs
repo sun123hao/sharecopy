@@ -217,6 +217,11 @@ impl DiscoveryService {
         Ok(())
     }
 
+    /// 更新设备名（用于 mDNS 重新注册时）
+    pub fn set_device_name(&mut self, name: String) {
+        self.device_name = name;
+    }
+
     /// 停止服务
     pub fn stop(&self) -> AppResult<()> {
         // 构造完整服务名: "{instance_name}.{service_type}"

@@ -282,6 +282,45 @@ fn get_app_context<'a>(env: &mut jni::JNIEnv<'a>) -> AppResult<JObject<'a>> {
     Ok(app)
 }
 
+/// 获取 Android 默认保存目录（外部文件目录，用户可访问）
+#[cfg(target_os = "android")]
+pub fn get_default_save_dir() -> AppResult<std::path::PathBuf> {
+    let jvm = get_jvm()?;
+    let mut env = jvm.attach_current_thread().map_err(|e| {
+        crate::error::AppError::Transfer(format!("JNI attach: {}", e))
+    })?;
+
+    let context = get_app_context(&mut env)?;
+    let ext_files = env
+        .call_method(&context, "getExternalFilesDir", "(Ljava/lang/String;)Ljava/io/File;", &[
+            JValue::Object(&JObject::null()),
+        ])
+        .and_then(|v| v.l())
+        .map_err(|e| {
+            crate::error::AppError::Transfer(format!("getExternalFilesDir: {}", e))
+        })?;
+
+    if ext_files.is_null() {
+        return Err(crate::error::AppError::Transfer("外部文件目录为空".into()));
+    }
+
+    let abs = env
+        .call_method(&ext_files, "getAbsolutePath", "()Ljava/lang/String;", &[])
+        .and_then(|v| v.l())
+        .map_err(|e| {
+            crate::error::AppError::Transfer(format!("getAbsolutePath: {}", e))
+        })?;
+
+    let path: String = unsafe {
+        let js = jni::objects::JString::from_raw(abs.into_raw());
+        env.get_string(&js).map(|s| s.into()).map_err(|e| {
+            crate::error::AppError::Transfer(format!("get_string: {}", e))
+        })?
+    };
+
+    Ok(std::path::PathBuf::from(path))
+}
+
 /// 获取 Android 可用的保存目录列表
 /// 返回应用外部文件目录和标准公共目录
 #[cfg(target_os = "android")]
