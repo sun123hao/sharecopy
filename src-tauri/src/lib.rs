@@ -55,12 +55,18 @@ async fn update_device_name(
     state: tauri::State<'_, AppState>,
     name: String,
 ) -> Result<(), String> {
+    tracing::info!("update_device_name 被调用: {}", name);
     let mut config = state.config.write().await;
     config.device_name = name.clone();
     config.name_customized = true; // 标记为用户自定义，防止 Android 覆盖
-    config.save().map_err(|e| e.to_string())?;
+    config.save().map_err(|e| {
+        tracing::error!("保存配置失败: {}", e);
+        e.to_string()
+    })?;
+    tracing::info!("配置已保存, 通知 mDNS 更新...");
     // 通知同步引擎更新设备名（重新注册 mDNS）
     state.sync_engine.update_device_name(&name);
+    tracing::info!("设备名更新完成: {}", name);
     Ok(())
 }
 

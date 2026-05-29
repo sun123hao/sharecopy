@@ -93,15 +93,21 @@ impl AppConfig {
     /// 保存配置到文件
     pub fn save(&self) -> AppResult<()> {
         let dir = Self::config_dir();
+        tracing::info!("save: config_dir={}", dir.display());
         std::fs::create_dir_all(&dir).map_err(|e| {
+            tracing::error!("save: create_dir_all 失败: {}", e);
             crate::error::AppError::Config(format!("创建配置目录失败: {}", e))
         })?;
+        let path = Self::config_path();
+        tracing::info!("save: config_path={}", path.display());
         let content = toml::to_string_pretty(self).map_err(|e| {
             crate::error::AppError::Config(format!("序列化配置失败: {}", e))
         })?;
-        std::fs::write(Self::config_path(), content).map_err(|e| {
+        std::fs::write(&path, content).map_err(|e| {
+            tracing::error!("save: write 失败: {}", e);
             crate::error::AppError::Config(format!("写入配置文件失败: {}", e))
         })?;
+        tracing::info!("save: 写入成功");
         Ok(())
     }
 
@@ -111,14 +117,22 @@ impl AppConfig {
     }
 
     fn config_dir() -> PathBuf {
-        directories::ProjectDirs::from("com", "sharecopy", "ShareCopy")
-            .map(|d| d.config_dir().to_path_buf())
-            .unwrap_or_else(|| {
-                let home = directories::BaseDirs::new()
-                    .map(|d| d.home_dir().to_path_buf())
-                    .unwrap_or_else(|| PathBuf::from("."));
-                home.join(".sharecopy")
-            })
+        // Android: 使用 app 内置 files 目录，始终可读写
+        #[cfg(target_os = "android")]
+        {
+            PathBuf::from("/data/data/com.sharecopy.app/files/config")
+        }
+        #[cfg(not(target_os = "android"))]
+        {
+            directories::ProjectDirs::from("com", "sharecopy", "ShareCopy")
+                .map(|d| d.config_dir().to_path_buf())
+                .unwrap_or_else(|| {
+                    let home = directories::BaseDirs::new()
+                        .map(|d| d.home_dir().to_path_buf())
+                        .unwrap_or_else(|| PathBuf::from("."));
+                    home.join(".sharecopy")
+                })
+        }
     }
 }
 

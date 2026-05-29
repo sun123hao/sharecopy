@@ -56,12 +56,6 @@ export function Settings({ theme, setTheme }: { theme: Theme; setTheme: (t: Them
     }
   }, [config]);
 
-  const handleDeviceNameSave = () => {
-    if (deviceName && deviceName !== config?.device_name) {
-      updateDeviceName(deviceName);
-    }
-  };
-
   const handleSaveDirChange = (dir: string) => {
     setSaveDir(dir);
     if (config) {
@@ -119,21 +113,27 @@ export function Settings({ theme, setTheme }: { theme: Theme; setTheme: (t: Them
       {/* 设备名称 */}
       <div>
         <label className="text-[11px] text-slate-500 dark:text-slate-400 mb-1.5 block">设备名称</label>
-        <div className="flex gap-2">
-          <input
-            type="text"
-            value={deviceName}
-            onChange={(e) => setDeviceName(e.target.value)}
-            className="flex-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2.5 text-sm text-slate-800 dark:text-slate-200 focus:outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-50 dark:focus:ring-amber-500/10 transition-all"
-          />
-          {deviceName !== config?.device_name && (
-            <button
-              onClick={handleDeviceNameSave}
-              className="px-3 py-2.5 rounded-xl bg-amber-500 text-white text-sm font-medium hover:bg-amber-600 transition-colors"
-            >
-              保存
-            </button>
-          )}
+        <input
+          type="text"
+          value={deviceName}
+          onChange={(e) => setDeviceName(e.target.value)}
+          placeholder="输入设备名称"
+          className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2.5 text-sm text-slate-800 dark:text-slate-200 focus:outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-50 dark:focus:ring-amber-500/10 transition-all"
+        />
+        <div className="flex items-center gap-2 mt-2">
+          <button
+            type="button"
+            onClick={(e) => {
+              e.preventDefault();
+              const currentName = (document.querySelector('input[placeholder=\"输入设备名称\"]') as HTMLInputElement)?.value;
+              if (currentName && currentName !== config?.device_name) {
+                updateDeviceName(currentName);
+              }
+            }}
+            className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-600 active:bg-amber-700 text-white text-sm font-medium transition-colors"
+          >
+            保存名称
+          </button>
         </div>
       </div>
 
