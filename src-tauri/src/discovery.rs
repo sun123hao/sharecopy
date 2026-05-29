@@ -39,6 +39,8 @@ pub struct DiscoveryService {
     tcp_port: u16,
     /// 手动指定的本机 IP（Android 上通过 JNI 获取）
     my_ip: Option<std::net::IpAddr>,
+    /// 防止重复创建浏览器线程（改名时 re-register 会再次调用 start）
+    browser_started: bool,
 }
 
 impl DiscoveryService {
@@ -77,6 +79,7 @@ impl DiscoveryService {
             platform,
             tcp_port,
             my_ip,
+            browser_started: false,
         })
     }
 
@@ -127,17 +130,21 @@ impl DiscoveryService {
         );
 
         // 启动浏览器
-        let rx = self
-            .mdns
-            .browse(SERVICE_TYPE)
-            .map_err(|e| crate::error::AppError::Discovery(format!("mDNS 浏览失败: {}", e)))?;
+        // 仅在首次启动时创建浏览器线程，改名时仅重新注册服务
+        if !self.browser_started {
+            self.browser_started = true;
 
-        let devices = self.discovered_devices.clone();
-        let event_tx = self.event_tx.clone();
-        let my_device_id = self.device_id.clone();
+            let rx = self
+                .mdns
+                .browse(SERVICE_TYPE)
+                .map_err(|e| crate::error::AppError::Discovery(format!("mDNS 浏览失败: {}", e)))?;
 
-        // 在单独线程中运行同步的 mDNS 事件循环
-        std::thread::spawn(move || {
+            let devices = self.discovered_devices.clone();
+            let event_tx = self.event_tx.clone();
+            let my_device_id = self.device_id.clone();
+
+            // 在单独线程中运行同步的 mDNS 事件循环
+            std::thread::spawn(move || {
             loop {
                 match rx.recv() {
                     Ok(event) => match event {
@@ -214,7 +221,11 @@ impl DiscoveryService {
             }
         });
 
-        Ok(())
+            Ok(())
+        } else {
+            // 浏览器已启动，仅重新注册服务（改名时调用）
+            Ok(())
+        }
     }
 
     /// 更新设备名（用于 mDNS 重新注册时）

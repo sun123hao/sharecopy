@@ -232,14 +232,18 @@ pub fn run() {
             // ── 获取本机信息（Android 上在 JVM 就绪后通过 JNI 获取） ──
             #[cfg(target_os = "android")]
             {
-                // 用 JNI 获取真实设备型号（Build.MODEL）
-                match android_network::get_device_model() {
-                    Ok(name) if !name.is_empty() => {
-                        tracing::info!("Android 设备型号: {}", name);
-                        app_config.device_name = name;
+                // 仅在用户未自定义名称时（仍为 localhost/空），用 Build.MODEL 填充
+                if app_config.device_name.is_empty() || app_config.device_name == "localhost" {
+                    match android_network::get_device_model() {
+                        Ok(name) if !name.is_empty() => {
+                            tracing::info!("Android 设备型号: {}", name);
+                            app_config.device_name = name;
+                            // 持久化默认名称
+                            let _ = app_config.save();
+                        }
+                        Ok(_) => tracing::warn!("Android 设备型号为空"),
+                        Err(e) => tracing::warn!("无法获取 Android 设备型号: {}", e),
                     }
-                    Ok(_) => tracing::warn!("Android 设备型号为空，使用默认名称"),
-                    Err(e) => tracing::warn!("无法获取 Android 设备型号: {}", e),
                 }
             }
             let device_name = app_config.device_name.clone();
