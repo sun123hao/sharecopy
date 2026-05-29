@@ -159,11 +159,6 @@ impl DiscoveryService {
                                 continue;
                             }
 
-                            // mDNS 去重：已发现的设备不重复发送事件
-                            if devices.contains_key(&device_id) {
-                                continue;
-                            }
-
                             let device_name = info
                                 .get_property("device_name")
                                 .map(|v| v.to_string())
@@ -173,6 +168,19 @@ impl DiscoveryService {
                                 .get_property("platform")
                                 .map(|v| v.to_string())
                                 .unwrap_or_else(|| "unknown".to_string());
+
+                            // 已存在则检查是否需要更新（改名检测）
+                            if let Some(existing) = devices.get(&device_id) {
+                                if existing.device_name == device_name
+                                    && existing.ip_address
+                                        == info.get_addresses().iter().next()
+                                            .map(|a| a.to_string())
+                                            .unwrap_or_default()
+                                {
+                                    continue; // 完全相同，跳过
+                                }
+                                // 设备信息有变化，更新并重新通知
+                            }
 
                             let device = DiscoveredDevice {
                                 device_id: device_id.clone(),
