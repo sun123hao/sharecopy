@@ -4,7 +4,6 @@ import { DeviceList } from './components/DeviceList';
 import { Settings as SettingsPage } from './components/Settings';
 import { ClipboardHistory } from './components/ClipboardHistory';
 import { TransferProgressPanel } from './components/TransferProgress';
-import { isMobile } from './hooks/usePlatform';
 
 type Page = 'devices' | 'settings' | 'history';
 type Theme = 'system' | 'light' | 'dark';
@@ -84,8 +83,8 @@ function App() {
         {activePage === 'history' && <ClipboardHistory />}
       </main>
 
-      {/* 传输进度（桌面端专属） */}
-      {!isMobile() && <TransferProgressPanel />}
+      {/* 传输进度 */}
+      <TransferProgressPanel />
 
       {/* 底部导航 */}
       <nav className="flex bg-white dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800 px-2 py-1 gap-1 transition-colors">

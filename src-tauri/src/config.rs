@@ -44,9 +44,27 @@ impl Default for AppConfig {
 }
 
 fn dirs_next_download_dir() -> PathBuf {
-    directories::UserDirs::new()
-        .and_then(|d| d.download_dir().map(|p| p.to_path_buf()))
-        .unwrap_or_else(|| PathBuf::from("."))
+    // Android: 优先用外部文件目录（无需存储权限），回退到内部数据目录
+    #[cfg(target_os = "android")]
+    {
+        directories::BaseDirs::new()
+            .and_then(|d| {
+                // 尝试 data_dir，通常映射到 /data/data/<app>/files
+                let dir = d.data_dir().to_path_buf();
+                if std::fs::create_dir_all(&dir).is_ok() {
+                    Some(dir)
+                } else {
+                    None
+                }
+            })
+            .unwrap_or_else(|| PathBuf::from("."))
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        directories::UserDirs::new()
+            .and_then(|d| d.download_dir().map(|p| p.to_path_buf()))
+            .unwrap_or_else(|| PathBuf::from("."))
+    }
 }
 
 impl AppConfig {

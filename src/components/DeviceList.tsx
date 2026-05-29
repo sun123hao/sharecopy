@@ -3,7 +3,6 @@ import { Monitor, SendHorizonal } from 'lucide-react';
 import { useAppStore } from '../store/useAppStore';
 import { useDeviceOnline, useDeviceOffline } from '../hooks/useTauriEvents';
 import { sendFiles } from '../hooks/useTauriCommands';
-import { isMobile } from '../hooks/usePlatform';
 import type { DiscoveredDevice } from '../types';
 
 function deviceInitial(name: string): string {
@@ -111,8 +110,7 @@ export function DeviceList() {
                 <span className="bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400 text-[10px] px-2 py-0.5 rounded-md">
                   :{device.tcp_port}
                 </span>
-                {/* 发送文件按钮（桌面端专属） */}
-                {!isMobile() && (
+                {/* 发送文件按钮 */}
                 <button
                   onClick={() => handleSendFile(device.device_id)}
                   className="p-1.5 rounded-lg hover:bg-amber-50 dark:hover:bg-amber-500/10 transition-colors"
@@ -120,7 +118,6 @@ export function DeviceList() {
                 >
                   <SendHorizonal className="w-4 h-4 text-slate-400 dark:text-slate-500 hover:text-amber-500" />
                 </button>
-                )}
                 <span className="w-2 h-2 rounded-full bg-emerald-500 shadow-[0_0_5px_rgba(16,185,129,0.3)]" />
               </div>
             </div>

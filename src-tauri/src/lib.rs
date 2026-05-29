@@ -166,59 +166,15 @@ pub fn run() {
             // 加载配置
             let mut app_config = AppConfig::load().unwrap_or_default();
             let device_id = app_config.device_id.clone();
-            let _device_name = app_config.device_name.clone();
             let tcp_port = app_config.tcp_port;
             let save_dir = app_config.save_dir.clone();
-
-            // 获取本机信息
-            // Android: 用 JNI 获取设备型号覆盖默认名称（hostname crate 在 Android 不可靠）
-            #[cfg(target_os = "android")]
-            let android_device_name = android_network::get_device_model().ok();
-            #[cfg(target_os = "android")]
-            if let Some(ref name) = android_device_name {
-                if !name.is_empty() {
-                    app_config.device_name = name.clone();
-                }
-            }
-            let device_name = app_config.device_name.clone();
-
-            let hostname = {
-                #[cfg(target_os = "android")]
-                let h = {
-                    // Android 上使用设备 ID 构建唯一 hostname
-                    format!("android-{}.local.", &device_id[..std::cmp::min(8, device_id.len())])
-                };
-                #[cfg(not(target_os = "android"))]
-                let h = hostname::get()
-                    .unwrap_or_default()
-                    .to_string_lossy()
-                    .into_owned();
-                // mdns-sd 要求 hostname 以 ".local." 结尾
-                if h.ends_with(".local.") {
-                    h
-                } else if h.ends_with(".local") {
-                    format!("{}.", h)
-                } else {
-                    format!("{}.local.", h.trim_end_matches('.'))
-                }
-            };
             let platform = std::env::consts::OS.to_string();
-
-            tracing::info!("设备: {} ({}), 端口: {}", device_name, platform, tcp_port);
 
             // 创建网络事件通道
             let (network_event_tx, network_event_rx) =
                 mpsc::unbounded_channel::<NetworkEvent>();
 
-            // 创建网络管理器
-            let network = Arc::new(NetworkManager::new(
-                device_id.clone(),
-                device_name.clone(),
-                tcp_port,
-                network_event_tx,
-            ));
-
-            // 创建剪贴板后端
+            // ── 先创建剪贴板后端（Android 上这会使 JVM 就绪） ──
             #[cfg(target_os = "macos")]
             let clipboard_backend: Box<dyn clipboard::ClipboardBackend> = {
                 match clipboard_macos::MacOSClipboardBackend::new() {
@@ -249,6 +205,52 @@ pub fn run() {
                     }
                 }
             };
+
+            // ── 获取本机信息（Android 上在 JVM 就绪后通过 JNI 获取） ──
+            #[cfg(target_os = "android")]
+            {
+                // 用 JNI 获取真实设备型号（Build.MODEL）
+                match android_network::get_device_model() {
+                    Ok(name) if !name.is_empty() => {
+                        tracing::info!("Android 设备型号: {}", name);
+                        app_config.device_name = name;
+                    }
+                    Ok(_) => tracing::warn!("Android 设备型号为空，使用默认名称"),
+                    Err(e) => tracing::warn!("无法获取 Android 设备型号: {}", e),
+                }
+            }
+            let device_name = app_config.device_name.clone();
+
+            let hostname = {
+                #[cfg(target_os = "android")]
+                let h = {
+                    // Android 上使用设备 ID 构建唯一 hostname
+                    format!("android-{}.local.", &device_id[..std::cmp::min(8, device_id.len())])
+                };
+                #[cfg(not(target_os = "android"))]
+                let h = hostname::get()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .into_owned();
+                // mdns-sd 要求 hostname 以 ".local." 结尾
+                if h.ends_with(".local.") {
+                    h
+                } else if h.ends_with(".local") {
+                    format!("{}.", h)
+                } else {
+                    format!("{}.local.", h.trim_end_matches('.'))
+                }
+            };
+
+            tracing::info!("设备: {} ({}), 端口: {}", device_name, platform, tcp_port);
+
+            // 创建网络管理器
+            let network = Arc::new(NetworkManager::new(
+                device_id.clone(),
+                device_name.clone(),
+                tcp_port,
+                network_event_tx,
+            ));
 
             // 创建剪贴板监视器（run() 使用 &self，可安全放入 Arc）
             let (clipboard_tx, clipboard_rx) = mpsc::unbounded_channel();
