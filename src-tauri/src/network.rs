@@ -192,21 +192,20 @@ impl NetworkManager {
                             tracing::warn!("检测到自我连接，忽略");
                             return Ok(());
                         }
-                        // 防止重复连接：双向发现时双方各自发起连接，只保留第一条
-                        if connections.contains_key(&remote_device_id) {
+                        let (send_tx, mut send_rx) =
+                            tokio::sync::mpsc::unbounded_channel::<Vec<u8>>();
+
+                        // 原子插入：若已存在则忽略此连接（防止双向发现导致重复）
+                        if connections.insert(remote_device_id.clone(), send_tx).is_some() {
                             tracing::debug!(
                                 "设备 {} 已连接，忽略重复连接请求",
                                 remote_device_name
                             );
                             return Ok(());
                         }
-                        tracing::info!("设备握手完成: {} ({})", remote_device_name, remote_device_id);
-
-                        let (send_tx, mut send_rx) =
-                            tokio::sync::mpsc::unbounded_channel::<Vec<u8>>();
-
-                        connections.insert(remote_device_id.clone(), send_tx);
                         last_activity.insert(remote_device_id.clone(), Instant::now());
+
+                        tracing::info!("设备握手完成: {} ({})", remote_device_name, remote_device_id);
 
                         let _ = event_tx.send(NetworkEvent::DeviceConnected {
                             device_name: remote_device_name,
@@ -305,19 +304,26 @@ impl NetworkManager {
             tracing::debug!("跳过自身连接: device_id={}", device.device_id);
             return Ok(());
         }
-        if self.connections.contains_key(&device.device_id) {
+        // 原子占位：插入空 sender 防止竞态，connect 失败时移除
+        let (placeholder_tx, _) = tokio::sync::mpsc::unbounded_channel::<Vec<u8>>();
+        if self.connections.insert(device.device_id.clone(), placeholder_tx).is_some() {
+            tracing::debug!("设备 {} 已被连接，跳过", device.device_name);
             return Ok(());
         }
 
         let addr = format!("{}:{}", device.ip_address, device.tcp_port);
         tracing::info!("正在连接设备: {} ({})...", device.device_name, addr);
 
-        let mut stream = TcpStream::connect(&addr).await.map_err(|e| {
-            AppError::Network(std::io::Error::new(
-                std::io::ErrorKind::ConnectionRefused,
-                format!("连接 {} 失败: {}", addr, e),
-            ))
-        })?;
+        let mut stream = match TcpStream::connect(&addr).await {
+            Ok(s) => s,
+            Err(e) => {
+                self.connections.remove(&device.device_id);
+                return Err(AppError::Network(std::io::Error::new(
+                    std::io::ErrorKind::ConnectionRefused,
+                    format!("连接 {} 失败: {}", addr, e),
+                )));
+            }
+        };
 
         // 发送握手消息
         let handshake = Message::DeviceInfo(crate::protocol::DeviceInfoPayload {
@@ -333,10 +339,14 @@ impl NetworkManager {
         });
 
         let encoded = handshake.encode()?;
-        stream.write_all(&encoded).await?;
+        if let Err(e) = stream.write_all(&encoded).await {
+            self.connections.remove(&device.device_id);
+            return Err(AppError::Network(e));
+        }
 
         let (send_tx, mut send_rx) = tokio::sync::mpsc::unbounded_channel::<Vec<u8>>();
 
+        // 替换占位 sender 为真实 sender
         self.connections
             .insert(device.device_id.clone(), send_tx);
         self.last_activity.insert(device.device_id.clone(), Instant::now());

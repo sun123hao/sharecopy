@@ -191,7 +191,6 @@ pub fn run() {
             let mut app_config = AppConfig::load().unwrap_or_default();
             let device_id = app_config.device_id.clone();
             let tcp_port = app_config.tcp_port;
-            let save_dir = app_config.save_dir.clone();
             let platform = std::env::consts::OS.to_string();
 
             // 创建网络事件通道
@@ -331,7 +330,8 @@ pub fn run() {
                 tracing::warn!("设备发现启动失败（后台功能不可用）: {}", e);
             }
 
-            // 创建文件传输管理器
+            // 创建文件传输管理器（save_dir 在 Android 覆盖后取值）
+            let save_dir = app_config.save_dir.clone();
             let (progress_tx, mut progress_rx) = mpsc::unbounded_channel();
             let transfer_manager = Arc::new(FileTransferManager::new(
                 save_dir,
