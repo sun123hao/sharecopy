@@ -192,6 +192,14 @@ impl NetworkManager {
                             tracing::warn!("检测到自我连接，忽略");
                             return Ok(());
                         }
+                        // 防止重复连接：双向发现时双方各自发起连接，只保留第一条
+                        if connections.contains_key(&remote_device_id) {
+                            tracing::debug!(
+                                "设备 {} 已连接，忽略重复连接请求",
+                                remote_device_name
+                            );
+                            return Ok(());
+                        }
                         tracing::info!("设备握手完成: {} ({})", remote_device_name, remote_device_id);
 
                         let (send_tx, mut send_rx) =

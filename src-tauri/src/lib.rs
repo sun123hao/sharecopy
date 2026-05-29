@@ -14,6 +14,8 @@ mod clipboard_windows;
 mod clipboard_android;
 #[cfg(target_os = "android")]
 mod android_network;
+#[cfg(target_os = "android")]
+mod android_file;
 mod discovery;
 mod network;
 mod sync;
@@ -87,7 +89,13 @@ async fn send_files(
     target: String,
 ) -> Result<(), String> {
     for path in paths {
-        let p = std::path::PathBuf::from(&path);
+        // Android: 将 content:// URI 转换为可读取的临时文件路径
+        #[cfg(target_os = "android")]
+        let resolved = android_file::resolve_content_uri(&path).map_err(|e| e.to_string())?;
+        #[cfg(not(target_os = "android"))]
+        let resolved = path;
+
+        let p = std::path::PathBuf::from(&resolved);
         state
             .transfer_manager
             .send_file(&p, &target)
@@ -95,6 +103,19 @@ async fn send_files(
             .map_err(|e| e.to_string())?;
     }
     Ok(())
+}
+
+/// 获取可用的保存目录路径（Android 返回真实目录，桌面端返回空）
+#[tauri::command]
+async fn get_android_save_dirs() -> Result<Vec<String>, String> {
+    #[cfg(target_os = "android")]
+    {
+        android_file::get_save_directories().map_err(|e| e.to_string())
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        Ok(Vec::new())
+    }
 }
 
 #[tauri::command]
@@ -377,10 +398,12 @@ pub fn run() {
             get_clipboard_history,
             copy_from_history,
             is_sync_enabled,
+            get_android_save_dirs,
         ])
         .build(tauri::generate_context!())
         .expect("ShareCopy 启动失败")
-        .run(|_app_handle, event| {
+        .run(|app_handle, event| {
+            #[allow(unused_variables)]
             // macOS: 点击 Dock 图标恢复主窗口
             #[cfg(target_os = "macos")]
             if let RunEvent::Reopen { .. } = event {

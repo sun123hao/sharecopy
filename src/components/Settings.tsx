@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import { FolderOpen, Sun, Moon, Monitor } from 'lucide-react';
 import { useAppStore } from '../store/useAppStore';
-import { isMobile } from '../hooks/usePlatform';
+import { isMobile, detectPlatform } from '../hooks/usePlatform';
+import { getAndroidSaveDirs } from '../hooks/useTauriCommands';
 
 
 type Theme = 'system' | 'light' | 'dark';
@@ -68,6 +69,18 @@ export function Settings({ theme, setTheme }: { theme: Theme; setTheme: (t: Them
     }
   };
 
+  // Android: 加载可用保存目录列表
+  const [androidDirs, setAndroidDirs] = useState<string[]>([]);
+  const isAndroid = detectPlatform() === 'android';
+
+  useEffect(() => {
+    if (isAndroid) {
+      getAndroidSaveDirs()
+        .then(setAndroidDirs)
+        .catch(() => setAndroidDirs([]));
+    }
+  }, [isAndroid]);
+
   const handleSelectFolder = async () => {
     try {
       const { open } = await import('@tauri-apps/plugin-dialog');
@@ -118,20 +131,47 @@ export function Settings({ theme, setTheme }: { theme: Theme; setTheme: (t: Them
       {/* 文件保存路径 */}
       <div>
         <label className="text-[11px] text-slate-500 dark:text-slate-400 mb-1.5 block">文件保存路径</label>
-        <div className="flex gap-2">
-          <input
-            type="text"
-            value={saveDir}
-            onChange={(e) => handleSaveDirChange(e.target.value)}
-            className="flex-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2.5 text-sm text-slate-800 dark:text-slate-200 focus:outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-50 dark:focus:ring-amber-500/10 transition-all"
-          />
-          <button
-            onClick={handleSelectFolder}
-            className="flex items-center justify-center w-10 h-10 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors"
-          >
-            <FolderOpen className="w-4 h-4 text-slate-400 dark:text-slate-500" />
-          </button>
-        </div>
+        {/* Android: 显示预设目录选项 */}
+        {isAndroid && androidDirs.length > 0 ? (
+          <div className="space-y-1.5">
+            {androidDirs.map((dir) => (
+              <button
+                key={dir}
+                onClick={() => handleSaveDirChange(dir)}
+                className={`w-full text-left px-3 py-2 rounded-lg text-xs border transition-colors ${
+                  saveDir === dir
+                    ? 'border-amber-400 bg-amber-50 dark:bg-amber-500/10 text-amber-700 dark:text-amber-300'
+                    : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:border-slate-300 dark:hover:border-slate-600'
+                }`}
+              >
+                {dir}
+              </button>
+            ))}
+            {/* 手动输入 */}
+            <input
+              type="text"
+              value={saveDir}
+              onChange={(e) => handleSaveDirChange(e.target.value)}
+              placeholder="或手动输入路径..."
+              className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-800 dark:text-slate-200 focus:outline-none focus:border-amber-400 transition-all"
+            />
+          </div>
+        ) : (
+          <div className="flex gap-2">
+            <input
+              type="text"
+              value={saveDir}
+              onChange={(e) => handleSaveDirChange(e.target.value)}
+              className="flex-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2.5 text-sm text-slate-800 dark:text-slate-200 focus:outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-50 dark:focus:ring-amber-500/10 transition-all"
+            />
+            <button
+              onClick={handleSelectFolder}
+              className="flex items-center justify-center w-10 h-10 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors"
+            >
+              <FolderOpen className="w-4 h-4 text-slate-400 dark:text-slate-500" />
+            </button>
+          </div>
+        )}
       </div>
 
       {/* 主题选择 */}

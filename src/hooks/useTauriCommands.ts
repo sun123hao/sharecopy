@@ -50,3 +50,8 @@ export async function getClipboardHistory(): Promise<ClipboardEntry[]> {
 export async function copyFromHistory(entryId: string): Promise<void> {
   return invoke('copy_from_history', { entryId });
 }
+
+// ── Android: 获取可用保存目录 ──────────────
+export async function getAndroidSaveDirs(): Promise<string[]> {
+  return invoke('get_android_save_dirs');
+}
