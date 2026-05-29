@@ -90,7 +90,7 @@ pub struct SyncEngine {
     history: Arc<parking_lot::Mutex<Vec<ClipboardHistoryEntry>>>,
     image_assemblers: Arc<parking_lot::Mutex<Vec<ImageChunkAssembler>>>,
     /// 无连接时缓存的最新剪贴板内容，设备连接后立即广播
-    pending_clipboard: Arc<parking_lot::Mutex<Option<(ClipboardContent, String)>>>,
+    pending_clipboard: Arc<parking_lot::Mutex<Option<(ClipboardContent, String, std::time::Instant)>>>,
     app_handle: AppHandle,
 }
 
@@ -165,10 +165,10 @@ impl SyncEngine {
             ClipboardContent::None => {}
         }
 
-        // 无连接时缓存内容，设备连上后立即广播
+        // 无连接时缓存内容，设备连上后立即广播（带时间戳）
         if self.network.connected_count() == 0 {
             let hash = content.content_hash();
-            *self.pending_clipboard.lock() = Some((content, hash));
+            *self.pending_clipboard.lock() = Some((content, hash, std::time::Instant::now()));
             return;
         }
 
@@ -382,9 +382,15 @@ impl SyncEngine {
 
     // ── 内部辅助 ──────────────────────────
 
-    /// 设备首次连接时，广播缓存的剪贴板内容
+    /// 设备首次连接时，广播缓存的剪贴板内容（超过 60 秒则丢弃）
     fn flush_pending_clipboard(&self) {
-        if let Some((content, _hash)) = self.pending_clipboard.lock().take() {
+        let pending = self.pending_clipboard.lock().take();
+        if let Some((content, _hash, cached_at)) = pending {
+            // 超过 60 秒的缓存视为过时，丢弃
+            if cached_at.elapsed() > std::time::Duration::from_secs(60) {
+                tracing::debug!("剪贴板缓存已过期，丢弃");
+                return;
+            }
             tracing::info!("设备已连接，广播缓存的剪贴板内容");
             let msg = match content {
                 ClipboardContent::Text(text) => Message::ClipboardText(ClipboardTextPayload {
