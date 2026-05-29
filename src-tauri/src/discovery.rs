@@ -151,7 +151,10 @@ impl DiscoveryService {
                         ServiceEvent::ServiceResolved(info) => {
                             let device_id = info
                                 .get_property("device_id")
-                                .map(|v| v.to_string())
+                                .map(|v| {
+                                    let s = v.to_string();
+                                    s.strip_prefix("device_id=").unwrap_or(&s).to_string()
+                                })
                                 .unwrap_or_default();
 
                             // 跳过本机（含 TXT 未就绪导致的空 ID）
@@ -161,7 +164,11 @@ impl DiscoveryService {
 
                             let device_name = info
                                 .get_property("device_name")
-                                .map(|v| v.to_string())
+                                .map(|v| {
+                                    // 防御：mDNS 库可能返回 "key=value" 格式
+                                    let s = v.to_string();
+                                    s.strip_prefix("device_name=").unwrap_or(&s).to_string()
+                                })
                                 .unwrap_or_else(|| "未知设备".to_string());
 
                             let platform = info
