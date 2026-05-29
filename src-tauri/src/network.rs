@@ -37,6 +37,8 @@ pub struct NetworkManager {
     device_name: String,
     port: u16,
     connections: Arc<DashMap<String, tokio::sync::mpsc::UnboundedSender<Vec<u8>>>>,
+    /// 已通知前端的设备（防止双向连接导致重复 DeviceConnected）
+    notified: Arc<DashMap<String, ()>>,
     last_activity: Arc<DashMap<String, Instant>>,
     event_tx: mpsc::UnboundedSender<NetworkEvent>,
     running: Arc<AtomicBool>,
@@ -56,6 +58,7 @@ impl NetworkManager {
             device_name,
             port,
             connections: Arc::new(DashMap::new()),
+            notified: Arc::new(DashMap::new()),
             last_activity: Arc::new(DashMap::new()),
             event_tx,
             running: Arc::new(AtomicBool::new(true)),
@@ -87,6 +90,7 @@ impl NetworkManager {
         let device_id = self.device_id.clone();
         let last_activity = self.last_activity.clone();
         let running = self.running.clone();
+        let notified = self.notified.clone();
 
         // 心跳 Ping 发送任务
         let hb_conns = self.connections.clone();
@@ -110,6 +114,7 @@ impl NetworkManager {
         let timeout_conns = self.connections.clone();
         let timeout_activity = self.last_activity.clone();
         let timeout_event = self.event_tx.clone();
+        let timeout_notified = self.notified.clone();
         let timeout_running = self.running.clone();
         tokio::spawn(async move {
             while timeout_running.load(Ordering::Relaxed) {
@@ -125,6 +130,7 @@ impl NetworkManager {
                     tracing::warn!("设备心跳超时，断开: {}", id);
                     timeout_conns.remove(&id);
                     timeout_activity.remove(&id);
+                    timeout_notified.remove(&id);
                     let _ = timeout_event.send(NetworkEvent::DeviceDisconnected {
                         device_id: id,
                     });
@@ -141,10 +147,11 @@ impl NetworkManager {
                         let evt = event_tx.clone();
                         let did = device_id.clone();
                         let act = last_activity.clone();
+                        let ntfy = notified.clone();
 
                         tokio::spawn(async move {
                             if let Err(e) =
-                                Self::handle_connection(stream, did, conns, evt, act).await
+                                Self::handle_connection(stream, did, conns, evt, act, ntfy).await
                             {
                                 tracing::error!("连接处理错误: {}", e);
                             }
@@ -168,6 +175,7 @@ impl NetworkManager {
         connections: Arc<DashMap<String, tokio::sync::mpsc::UnboundedSender<Vec<u8>>>>,
         event_tx: mpsc::UnboundedSender<NetworkEvent>,
         last_activity: Arc<DashMap<String, Instant>>,
+        notified: Arc<DashMap<String, ()>>,
     ) -> AppResult<()> {
         // 等待握手消息
         let mut decoder = FrameDecoder::new();
@@ -207,11 +215,14 @@ impl NetworkManager {
 
                         tracing::info!("设备握手完成: {} ({})", remote_device_name, remote_device_id);
 
-                        let _ = event_tx.send(NetworkEvent::DeviceConnected {
-                            device_name: remote_device_name,
-                            device_id: remote_device_id.clone(),
-                            platform: remote_platform,
-                        });
+                        // 仅首次连接时通知前端
+                        if notified.insert(remote_device_id.clone(), ()).is_none() {
+                            let _ = event_tx.send(NetworkEvent::DeviceConnected {
+                                device_name: remote_device_name,
+                                device_id: remote_device_id.clone(),
+                                platform: remote_platform,
+                            });
+                        }
 
                         // 启动写入任务
                         let (read_half, mut write_half) = stream.into_split();
@@ -279,6 +290,7 @@ impl NetworkManager {
                         // 断开
                         connections.remove(&remote_device_id);
                         last_activity.remove(&remote_device_id);
+                        notified.remove(&remote_device_id);
                         let _ = event_tx.send(NetworkEvent::DeviceDisconnected {
                             device_id: remote_device_id.clone(),
                         });
@@ -318,6 +330,7 @@ impl NetworkManager {
             Ok(s) => s,
             Err(e) => {
                 self.connections.remove(&device.device_id);
+                self.notified.remove(&device.device_id);
                 return Err(AppError::Network(std::io::Error::new(
                     std::io::ErrorKind::ConnectionRefused,
                     format!("连接 {} 失败: {}", addr, e),
@@ -341,6 +354,7 @@ impl NetworkManager {
         let encoded = handshake.encode()?;
         if let Err(e) = stream.write_all(&encoded).await {
             self.connections.remove(&device.device_id);
+            self.notified.remove(&device.device_id);
             return Err(AppError::Network(e));
         }
 
@@ -351,11 +365,14 @@ impl NetworkManager {
             .insert(device.device_id.clone(), send_tx);
         self.last_activity.insert(device.device_id.clone(), Instant::now());
 
-        let _ = self.event_tx.send(NetworkEvent::DeviceConnected {
-            device_name: device.device_name.clone(),
-            device_id: device.device_id.clone(),
-            platform: device.platform.clone(),
-        });
+        // 仅首次连接时通知前端（防止双向连接重复通知）
+        if self.notified.insert(device.device_id.clone(), ()).is_none() {
+            let _ = self.event_tx.send(NetworkEvent::DeviceConnected {
+                device_name: device.device_name.clone(),
+                device_id: device.device_id.clone(),
+                platform: device.platform.clone(),
+            });
+        }
 
         // 后台任务处理读写
         let (read_half, mut write_half) = stream.into_split();
@@ -363,6 +380,7 @@ impl NetworkManager {
         let evt = self.event_tx.clone();
         let remote_id = device.device_id.clone();
         let act = self.last_activity.clone();
+        let ntfy = self.notified.clone();
         let my_id = self.device_id.clone();
 
         tokio::spawn(async move {
@@ -418,8 +436,9 @@ impl NetworkManager {
             write_task.abort();
             conns.remove(&remote_id);
             act.remove(&remote_id);
+            ntfy.remove(&remote_id);
             let _ = evt.send(NetworkEvent::DeviceDisconnected {
-                device_id: remote_id,
+                device_id: remote_id.clone(),
             });
         });
 
