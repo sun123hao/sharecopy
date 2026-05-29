@@ -2,7 +2,7 @@ use dashmap::DashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
-use tokio::io::AsyncWriteExt;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc;
 
@@ -170,7 +170,7 @@ impl NetworkManager {
     }
 
     async fn handle_connection(
-        stream: TcpStream,
+        mut stream: TcpStream,
         _my_device_id: String,
         connections: Arc<DashMap<String, tokio::sync::mpsc::UnboundedSender<Vec<u8>>>>,
         event_tx: mpsc::UnboundedSender<NetworkEvent>,
@@ -183,7 +183,7 @@ impl NetworkManager {
 
         // 尝试读取
         loop {
-            match stream.try_read(&mut buf) {
+            match stream.read(&mut buf).await {
                 Ok(0) => return Err(AppError::Protocol("连接关闭".into())),
                 Ok(n) => {
                     let messages = decoder.feed(&buf[..n]);
@@ -225,7 +225,7 @@ impl NetworkManager {
                         }
 
                         // 启动写入任务
-                        let (read_half, mut write_half) = stream.into_split();
+                        let (mut read_half, mut write_half) = stream.into_split();
 
                         let write_handle = {
                             let remote_id = remote_device_id.clone();
@@ -248,7 +248,7 @@ impl NetworkManager {
                         let my_id = _my_device_id.clone();
 
                         loop {
-                            match read_half.try_read(&mut buf2) {
+                            match read_half.read(&mut buf2).await {
                                 Ok(0) => break,
                                 Ok(n) => {
                                     let msgs = decoder2.feed(&buf2[..n]);
@@ -278,12 +278,10 @@ impl NetworkManager {
                                         });
                                     }
                                 }
-                                Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                                    tokio::time::sleep(tokio::time::Duration::from_millis(100))
-                                        .await;
-                                    continue;
+                                Err(e) => {
+                                    tracing::error!("读取错误: {}", e);
+                                    break;
                                 }
-                                Err(_) => break,
                             }
                         }
 
@@ -299,10 +297,6 @@ impl NetworkManager {
                         tracing::info!("设备断开: {}", remote_device_id);
                         return Ok(());
                     }
-                }
-                Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-                    continue;
                 }
                 Err(e) => return Err(AppError::Network(e)),
             }
@@ -375,7 +369,7 @@ impl NetworkManager {
         }
 
         // 后台任务处理读写
-        let (read_half, mut write_half) = stream.into_split();
+        let (mut read_half, mut write_half) = stream.into_split();
         let conns = self.connections.clone();
         let evt = self.event_tx.clone();
         let remote_id = device.device_id.clone();
@@ -397,7 +391,7 @@ impl NetworkManager {
             let mut decoder = FrameDecoder::new();
             let mut buf = vec![0u8; 65536];
             loop {
-                match read_half.try_read(&mut buf) {
+                match read_half.read(&mut buf).await {
                     Ok(0) => break,
                     Ok(n) => {
                         for msg in decoder.feed(&buf[..n]) {
@@ -425,11 +419,10 @@ impl NetworkManager {
                             });
                         }
                     }
-                    Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-                        continue;
+                    Err(e) => {
+                        tracing::error!("读取错误 ({}): {}", remote_id, e);
+                        break;
                     }
-                    Err(_) => break,
                 }
             }
 
