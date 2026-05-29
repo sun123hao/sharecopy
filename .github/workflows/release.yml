@@ -18,7 +18,7 @@ jobs:
     runs-on: macos-latest
     strategy:
       matrix:
-        target: [aarch64, x86_64]
+        target: [aarch64]
     steps:
       - uses: actions/checkout@v4
 
