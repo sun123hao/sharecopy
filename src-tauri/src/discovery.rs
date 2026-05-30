@@ -187,12 +187,18 @@ impl DiscoveryService {
         })
     }
 
-    /// 重新宣告 mDNS 服务（强制刷新 SRV/TXT 公告，解决 Windows mdns-sd 响应问题）
+    /// 重新宣告 mDNS 服务（先注销再注册，强制刷新 SRV/TXT 公告）
     pub fn reannounce(&mut self) -> AppResult<()> {
+        // 先注销旧服务（强制其他设备清除缓存）
+        let fullname = format!("{}.{}", self.service_name, SERVICE_TYPE);
+        if let Err(e) = self.mdns.unregister(&fullname) {
+            tracing::debug!("reannounce 注销旧服务失败: {}", e);
+        }
+        // 立即重新注册（触发完整的 mDNS 公告含 SRV/TXT）
         let service_info = self.build_service_info()?;
         self.mdns
             .register(service_info)
-            .map_err(|e| crate::error::AppError::Discovery(format!("重新宣告 mDNS 失败: {}", e)))?;
+            .map_err(|e| crate::error::AppError::Discovery(format!("重新注册 mDNS 失败: {}", e)))?;
         tracing::debug!("mDNS 服务已重新宣告");
         Ok(())
     }
