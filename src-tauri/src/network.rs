@@ -205,23 +205,33 @@ impl NetworkManager {
                             tracing::warn!("检测到自我连接，忽略");
                             return Ok(());
                         }
-                        // 原子插入：若已有连接则保留原有连接，忽略新请求
-                        let (send_tx, mut send_rx) =
-                            tokio::sync::mpsc::unbounded_channel::<Vec<u8>>();
-                        let old =
-                            connections.insert(remote_device_id.clone(), send_tx);
-                        if old.is_some() {
-                            // 已有活跃连接，恢复旧 sender（新 sender 被 drop）
-                            // 注意：insert 返回旧值，这里把旧值放回去
-                            if let Some(prev) = old {
-                                connections.insert(remote_device_id.clone(), prev);
-                            }
+                        // 已有连接时不替换，静默等待此 TCP 流自然关闭
+                        if connections.contains_key(&remote_device_id) {
                             tracing::debug!(
-                                "设备 {} 已连接，忽略重复连接请求",
+                                "设备 {} 已连接，忽略重复连接",
                                 remote_device_name
                             );
+                            // 不能直接 return（会 drop stream → 对方 write 失败 → 断连循环）
+                            // 改为静默读取直到对方关闭，保持 TCP 半连接不触发 RST
+                            let mut drain_buf = vec![0u8; 4096];
+                            let _ = tokio::time::timeout(
+                                std::time::Duration::from_secs(300),
+                                async {
+                                    loop {
+                                        match stream.read(&mut drain_buf).await {
+                                            Ok(0) | Err(_) => break,
+                                            Ok(_) => {}
+                                        }
+                                    }
+                                },
+                            )
+                            .await;
                             return Ok(());
                         }
+
+                        let (send_tx, mut send_rx) =
+                            tokio::sync::mpsc::unbounded_channel::<Vec<u8>>();
+                        connections.insert(remote_device_id.clone(), send_tx);
                         last_activity.insert(remote_device_id.clone(), Instant::now());
 
                         tracing::info!("设备握手完成: {} ({})", remote_device_name, remote_device_id);
