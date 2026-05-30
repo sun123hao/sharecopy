@@ -636,12 +636,7 @@ impl SyncEngine {
                 if self.network.is_connected(&device.device_id) {
                     continue;
                 }
-                // 跳过超过 120s 未更新的设备（可能已离线）
-                let age = chrono::Utc::now() - device.last_seen;
-                if age > chrono::Duration::seconds(120) {
-                    continue;
-                }
-                // 触发重连（内部有退避机制）
+                // 触发重连（内部有退避机制和 staleness 检查）
                 self.try_reconnect_device(&device.device_id);
             }
         }

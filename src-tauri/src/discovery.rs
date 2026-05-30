@@ -276,23 +276,9 @@ impl DiscoveryService {
                                 .map(|a| a.to_string())
                                 .unwrap_or_default();
 
-                            let is_new_or_changed = if let Some(existing) = devices.get(&device_id)
-                            {
-                                // 检查是否需要重新通知（改名或 IP 变化）
-                                let changed = existing.device_name != device_name
-                                    || existing.ip_address != ip_address;
-                                // 释放读锁后更新 last_seen
-                                drop(existing);
-                                if let Some(mut existing) = devices.get_mut(&device_id) {
-                                    existing.last_seen = chrono::Utc::now();
-                                }
-                                changed
-                            } else {
-                                true // 新设备
-                            };
-
-                            if !is_new_or_changed {
-                                continue; // 设备未变化且已更新 last_seen，无需重新通知
+                            // 始终更新 last_seen（即使设备信息未变）
+                            if let Some(mut existing) = devices.get_mut(&device_id) {
+                                existing.last_seen = chrono::Utc::now();
                             }
 
                             let device = DiscoveredDevice {
