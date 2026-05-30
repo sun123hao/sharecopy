@@ -145,6 +145,19 @@ impl SyncEngine {
             tokio::time::Duration::from_secs(15) + tokio::time::Duration::from_millis(jitter_ms),
         );
 
+        // 启动爆发：密集 mDNS 查询加速初始发现
+        let discovery_ref = self.discovery.clone();
+        tokio::spawn(async move {
+            for delay_secs in [0u64, 1, 2, 4, 8] {
+                if delay_secs > 0 {
+                    tokio::time::sleep(tokio::time::Duration::from_secs(delay_secs)).await;
+                }
+                if let Ok(mut d) = discovery_ref.lock() {
+                    let _ = d.rebrowse();
+                }
+            }
+        });
+
         loop {
             tokio::select! {
                 // 本地剪贴板变化 → 广播
