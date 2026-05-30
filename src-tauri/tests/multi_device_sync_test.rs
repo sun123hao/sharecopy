@@ -780,3 +780,6 @@ async fn test_e2e_clipboard_session_three_devices() {
     assert!(b.network.is_connected("user-a") || b.network.connected_count() >= 1,
         "B 应与 A 保持连接");
 }
+
+// 注: 息屏重连场景依赖真实 Android 设备（WiFi/进程生命周期），自动化难模拟
+// 手工验证: 打开 App → 息屏 30s → 亮屏 → 观察自动重连
