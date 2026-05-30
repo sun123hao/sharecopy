@@ -460,8 +460,9 @@ impl SyncEngine {
             DiscoveryEvent::DeviceFound(device) => {
                 // mDNS 刷新时清除退避，准备快速重连
                 self.reconnect_backoff.remove(&device.device_id);
-                // 只有 device_id 大的一端主动连接，避免双向同时连接导致 drain 丢数据
-                if device.device_id > self.device_id {
+                // 单向连接规则：大端连接，但 Android 总是主动连接（作为 server 不可靠）
+                let is_android = std::env::consts::OS == "android";
+                if is_android || device.device_id > self.device_id {
                     let device_name = device.device_name.clone();
                     match self.network.connect_to_device(&device).await {
                         Ok(()) => {}
@@ -583,8 +584,10 @@ impl SyncEngine {
 
     /// 尝试重连已发现的设备（带指数退避）
     fn try_reconnect_device(&self, device_id: &str) {
-        // 非大端等待 30s 回退（大端可能因防火墙无法连接）
-        if device_id <= self.device_id.as_str() {
+        // Android 总是主动连接（作为 server 因 WiFi 休眠不可靠）
+        // 非 Android 非大端等待 30s 回退
+        let is_android = std::env::consts::OS == "android";
+        if !is_android && device_id <= self.device_id.as_str() {
             let should_fallback = {
                 if let Ok(discovery) = self.discovery.lock() {
                     discovery.list_devices().into_iter().any(|d| {
