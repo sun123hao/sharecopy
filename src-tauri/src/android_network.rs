@@ -291,6 +291,99 @@ pub fn acquire_wifi_lock() -> AppResult<()> {
     Ok(())
 }
 
+/// 获取 CPU Wakelock，防止息屏后 CPU 休眠导致 TCP 连接中断
+pub fn acquire_wake_lock() -> AppResult<()> {
+    let jvm = get_jvm()?;
+    let mut env = jvm.attach_current_thread().map_err(|e| {
+        crate::error::AppError::Network(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            format!("JNI 线程附加失败: {}", e),
+        ))
+    })?;
+
+    let context = get_app_context(&mut env)?;
+
+    let svc_name = env
+        .get_static_field(
+            "android/content/Context",
+            "POWER_SERVICE",
+            "Ljava/lang/String;",
+        )
+        .and_then(|v| v.l())
+        .map_err(|e| {
+            crate::error::AppError::Network(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                format!("POWER_SERVICE: {}", e),
+            ))
+        })?;
+
+    let pm = env
+        .call_method(
+            &context,
+            "getSystemService",
+            "(Ljava/lang/String;)Ljava/lang/Object;",
+            &[JValue::Object(&svc_name)],
+        )
+        .and_then(|v| v.l())
+        .map_err(|e| {
+            crate::error::AppError::Network(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                format!("getSystemService(POWER): {}", e),
+            ))
+        })?;
+
+    if pm.is_null() {
+        return Err(crate::error::AppError::Network(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            "PowerManager 服务不可用",
+        )));
+    }
+
+    let tag = env.new_string("ShareCopy:WakeLock").map_err(|e| {
+        crate::error::AppError::Network(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            format!("new_string: {}", e),
+        ))
+    })?;
+
+    // PARTIAL_WAKE_LOCK = 1, ACQUIRE_CAUSES_WAKEUP = 0x10000000
+    let lock = env
+        .call_method(
+            &pm,
+            "newWakeLock",
+            "(ILjava/lang/String;)Landroid/os/PowerManager$WakeLock;",
+            &[JValue::Int(1), JValue::Object(&tag)], // PARTIAL_WAKE_LOCK
+        )
+        .and_then(|v| v.l())
+        .map_err(|e| {
+            crate::error::AppError::Network(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                format!("newWakeLock: {}", e),
+            ))
+        })?;
+
+    if !lock.is_null() {
+        // setReferenceCounted(false) 确保单次 release 即可释放
+        env.call_method(&lock, "setReferenceCounted", "(Z)V", &[JValue::Bool(false.into())])
+            .map_err(|e| {
+                crate::error::AppError::Network(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    format!("wakeLock.setReferenceCounted: {}", e),
+                ))
+            })?;
+        env.call_method(&lock, "acquire", "()V", &[])
+            .map_err(|e| {
+                crate::error::AppError::Network(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    format!("wakeLock.acquire: {}", e),
+                ))
+            })?;
+        tracing::info!("WakeLock 已获取，防止 CPU 休眠");
+    }
+
+    Ok(())
+}
+
 /// 获取 Android Application Context（内部使用）
 fn get_app_context<'a>(env: &mut jni::JNIEnv<'a>) -> AppResult<JObject<'a>> {
     let ath_cls = env

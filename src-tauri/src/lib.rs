@@ -278,9 +278,12 @@ pub fn run() {
                 }
             };
 
-            // Android: 获取 WiFi Lock 防止休眠断开连接
+            // Android: 获取 WakeLock + WifiLock 防止息屏后 CPU/WiFi 休眠
             #[cfg(target_os = "android")]
             {
+                if let Err(e) = android_network::acquire_wake_lock() {
+                    tracing::warn!("获取 WakeLock 失败: {}", e);
+                }
                 if let Err(e) = android_network::acquire_wifi_lock() {
                     tracing::warn!("获取 WiFi Lock 失败: {}", e);
                 }
