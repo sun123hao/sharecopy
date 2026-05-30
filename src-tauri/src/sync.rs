@@ -460,8 +460,21 @@ impl SyncEngine {
             DiscoveryEvent::DeviceFound(device) => {
                 // mDNS 刷新时清除退避，准备快速重连
                 self.reconnect_backoff.remove(&device.device_id);
-                // 单向连接：大端连接，避免双向碰撞 drain 丢数据
-                if device.device_id > self.device_id {
+                let is_android = std::env::consts::OS == "android";
+                let remote_is_android = device.platform == "android";
+
+                let should_connect = if is_android {
+                    // Android 始终主动连接（作为 server 因 WiFi 休眠不可靠）
+                    true
+                } else if remote_is_android {
+                    // 对方是 Android → 让它主动连，本端不连（避免双向）
+                    false
+                } else {
+                    // 非 Android 之间：小端连大端
+                    device.device_id > self.device_id
+                };
+
+                if should_connect {
                     let device_name = device.device_name.clone();
                     match self.network.connect_to_device(&device).await {
                         Ok(()) => {}
@@ -471,7 +484,7 @@ impl SyncEngine {
                     }
                 } else {
                     tracing::debug!(
-                        "设备 {} device_id 较小，等待对方连接（30s 超时后回退）",
+                        "设备 {} 等待对方主动连接（30s 超时后回退）",
                         device.device_name
                     );
                 }
@@ -583,8 +596,25 @@ impl SyncEngine {
 
     /// 尝试重连已发现的设备（带指数退避）
     fn try_reconnect_device(&self, device_id: &str) {
-        // 非大端等待 30s 回退（大端可能因防火墙/NAT 无法连接）
-        if device_id <= self.device_id.as_str() {
+        // Android 始终主动重连；非 Android 遇到 Android 设备时不重连（等 Android 主动）
+        let device = {
+            if let Ok(discovery) = self.discovery.lock() {
+                discovery.list_devices().into_iter().find(|d| d.device_id == device_id)
+            } else {
+                None
+            }
+        };
+        let Some(ref device) = device else { return };
+        let is_android = std::env::consts::OS == "android";
+        let remote_is_android = device.platform == "android";
+
+        if !is_android && remote_is_android {
+            // 对方是 Android → 等它主动连
+            return;
+        }
+
+        if !is_android && device_id <= self.device_id.as_str() {
+            // 非 Android 非小端等待 30s 回退
             let should_fallback = {
                 if let Ok(discovery) = self.discovery.lock() {
                     discovery.list_devices().into_iter().any(|d| {
@@ -598,22 +628,8 @@ impl SyncEngine {
             if !should_fallback {
                 return;
             }
-            tracing::info!("设备 {} 等待超时，小端主动回退连接", device_id);
+            tracing::info!("设备 {} 等待超时，主动回退连接", device_id);
         }
-        // 检查是否仍在 mDNS 发现列表中
-        let device = {
-            if let Ok(discovery) = self.discovery.lock() {
-                discovery.list_devices().into_iter().find(|d| d.device_id == device_id)
-            } else {
-                None
-            }
-        };
-
-        let Some(device) = device else {
-            tracing::debug!("设备 {} 不在发现列表中，跳过重连", device_id);
-            return;
-        };
-
         // 检查是否已连接（可能已由对端重新连接）
         if self.network.is_connected(device_id) {
             return;
