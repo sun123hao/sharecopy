@@ -44,8 +44,6 @@ pub struct DiscoveryService {
     my_ip: Option<std::net::IpAddr>,
     /// 防止重复创建浏览器线程（改名时 re-register 会再次调用 start）
     browser_started: bool,
-    /// rebrowse 创建的额外浏览器（保持存活）
-    extra_browsers: Vec<mdns_sd::Receiver<ServiceEvent>>,
 }
 
 impl DiscoveryService {
@@ -85,7 +83,6 @@ impl DiscoveryService {
             tcp_port,
             my_ip,
             browser_started: false,
-            extra_browsers: Vec::new(),
         })
     }
 
@@ -187,17 +184,50 @@ impl DiscoveryService {
         Ok(())
     }
 
-    /// 重新发送 mDNS 查询（不重启浏览器，仅发送新查询包）
+    /// 重新发送 mDNS 查询（启动独立线程处理返回事件，10s 后自动退出）
     pub fn rebrowse(&mut self) -> AppResult<()> {
-        self.mdns
+        let rx = self
+            .mdns
             .browse(SERVICE_TYPE)
-            .map(|rx| {
-                self.extra_browsers.push(rx);
-                tracing::debug!("mDNS rebrowse 已发送");
-            })
             .map_err(|e| {
                 crate::error::AppError::Discovery(format!("mDNS rebrowse 失败: {}", e))
-            })
+            })?;
+
+        let devices = self.discovered_devices.clone();
+        let event_tx = self.event_tx.clone();
+        let my_device_id = self.device_id.clone();
+
+        // 启动独立线程处理 rebrowse 返回的事件
+        // rx 在线程退出时自动 drop，浏览器将被清理
+        std::thread::spawn(move || {
+            tracing::debug!("mDNS rebrowse 线程启动");
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+            loop {
+                match rx.recv() {
+                    Ok(event) => {
+                        Self::process_service_event(
+                            event,
+                            &devices,
+                            &event_tx,
+                            &my_device_id,
+                        );
+                    }
+                    Err(e) => {
+                        tracing::debug!("rebrowse 浏览器错误: {}, 线程退出", e);
+                        break;
+                    }
+                }
+                // 超时退出，避免线程无限增长
+                if std::time::Instant::now() > deadline {
+                    tracing::debug!("mDNS rebrowse 线程超时退出");
+                    break;
+                }
+            }
+            // rx 在此 drop → 浏览器被清理
+        });
+
+        tracing::debug!("mDNS rebrowse 已发送");
+        Ok(())
     }
 
     /// 订阅发现事件
@@ -241,6 +271,97 @@ impl DiscoveryService {
 }
 
 impl DiscoveryService {
+    /// 处理单个 mDNS 服务事件（主浏览器和 rebrowse 线程共用）
+    fn process_service_event(
+        event: ServiceEvent,
+        devices: &DashMap<String, DiscoveredDevice>,
+        event_tx: &broadcast::Sender<DiscoveryEvent>,
+        my_device_id: &str,
+    ) {
+        match event {
+            ServiceEvent::ServiceResolved(info) => {
+                let device_id = info
+                    .get_property("device_id")
+                    .map(|v| {
+                        let s = v.to_string();
+                        s.strip_prefix("device_id=").unwrap_or(&s).to_string()
+                    })
+                    .unwrap_or_default();
+
+                // 跳过本机（含 TXT 未就绪导致的空 ID）
+                if device_id == my_device_id || device_id.is_empty() {
+                    return;
+                }
+
+                let device_name = info
+                    .get_property("device_name")
+                    .map(|v| {
+                        let s = v.to_string();
+                        s.strip_prefix("device_name=").unwrap_or(&s).to_string()
+                    })
+                    .unwrap_or_else(|| "未知设备".to_string());
+
+                let platform = info
+                    .get_property("platform")
+                    .map(|v| v.to_string())
+                    .unwrap_or_else(|| "unknown".to_string());
+
+                let ip_address = info
+                    .get_addresses()
+                    .iter()
+                    .next()
+                    .map(|a| a.to_string())
+                    .unwrap_or_default();
+
+                // 更新 last_seen + 保留 first_seen（用于回退超时判断）
+                let first_seen = if let Some(existing) = devices.get(&device_id) {
+                    let fs = existing.first_seen;
+                    drop(existing);
+                    if let Some(mut e) = devices.get_mut(&device_id) {
+                        e.last_seen = chrono::Utc::now();
+                    }
+                    fs // 保留首次发现时间
+                } else {
+                    chrono::Utc::now() // 新设备
+                };
+
+                let device = DiscoveredDevice {
+                    device_id: device_id.clone(),
+                    device_name,
+                    hostname: info.get_hostname().to_string(),
+                    platform,
+                    ip_address,
+                    tcp_port: info.get_port(),
+                    last_seen: chrono::Utc::now(),
+                    first_seen,
+                };
+
+                tracing::info!(
+                    "发现设备: {} ({}) @ {}:{}",
+                    device.device_name,
+                    device.platform,
+                    device.ip_address,
+                    device.tcp_port
+                );
+
+                let _ = event_tx.send(DiscoveryEvent::DeviceFound(device.clone()));
+                devices.insert(device_id, device);
+            }
+            ServiceEvent::ServiceRemoved(_service_type, fullname) => {
+                let device_id = fullname
+                    .strip_suffix(&format!(".{}", SERVICE_TYPE))
+                    .unwrap_or(&fullname);
+
+                if device_id != my_device_id {
+                    tracing::info!("设备离线: {}", device_id);
+                    let _ = event_tx.send(DiscoveryEvent::DeviceLost(device_id.to_string()));
+                    devices.remove(device_id);
+                }
+            }
+            _ => {}
+        }
+    }
+
     /// mDNS 浏览器事件循环（独立函数，运行在单独线程中）
     /// 出错时自动重试 browse，使用指数退避策略
     fn browse_loop(
@@ -258,91 +379,7 @@ impl DiscoveryService {
                 Ok(event) => {
                     // 成功收到事件时重置退避时间
                     backoff_secs = 5;
-
-                    match event {
-                        ServiceEvent::ServiceResolved(info) => {
-                            let device_id = info
-                                .get_property("device_id")
-                                .map(|v| {
-                                    let s = v.to_string();
-                                    s.strip_prefix("device_id=").unwrap_or(&s).to_string()
-                                })
-                                .unwrap_or_default();
-
-                            // 跳过本机（含 TXT 未就绪导致的空 ID）
-                            if device_id == my_device_id || device_id.is_empty() {
-                                continue;
-                            }
-
-                            let device_name = info
-                                .get_property("device_name")
-                                .map(|v| {
-                                    let s = v.to_string();
-                                    s.strip_prefix("device_name=").unwrap_or(&s).to_string()
-                                })
-                                .unwrap_or_else(|| "未知设备".to_string());
-
-                            let platform = info
-                                .get_property("platform")
-                                .map(|v| v.to_string())
-                                .unwrap_or_else(|| "unknown".to_string());
-
-                            let ip_address = info
-                                .get_addresses()
-                                .iter()
-                                .next()
-                                .map(|a| a.to_string())
-                                .unwrap_or_default();
-
-                            // 更新 last_seen + 保留 first_seen（用于回退超时判断）
-                            let first_seen = if let Some(existing) = devices.get(&device_id) {
-                                let fs = existing.first_seen;
-                                drop(existing);
-                                if let Some(mut e) = devices.get_mut(&device_id) {
-                                    e.last_seen = chrono::Utc::now();
-                                }
-                                fs // 保留首次发现时间
-                            } else {
-                                chrono::Utc::now() // 新设备
-                            };
-
-                            let device = DiscoveredDevice {
-                                device_id: device_id.clone(),
-                                device_name,
-                                hostname: info.get_hostname().to_string(),
-                                platform,
-                                ip_address,
-                                tcp_port: info.get_port(),
-                                last_seen: chrono::Utc::now(),
-                                first_seen,
-                            };
-
-                            tracing::info!(
-                                "发现设备: {} ({}) @ {}:{}",
-                                device.device_name,
-                                device.platform,
-                                device.ip_address,
-                                device.tcp_port
-                            );
-
-                            let _ =
-                                event_tx.send(DiscoveryEvent::DeviceFound(device.clone()));
-                            devices.insert(device_id, device);
-                        }
-                        ServiceEvent::ServiceRemoved(_service_type, fullname) => {
-                            let device_id = fullname
-                                .strip_suffix(&format!(".{}", SERVICE_TYPE))
-                                .unwrap_or(&fullname);
-
-                            if device_id != my_device_id {
-                                tracing::info!("设备离线: {}", device_id);
-                                let _ = event_tx
-                                    .send(DiscoveryEvent::DeviceLost(device_id.to_string()));
-                                devices.remove(device_id);
-                            }
-                        }
-                        _ => {}
-                    }
+                    Self::process_service_event(event, &devices, &event_tx, &my_device_id);
                 }
                 Err(e) => {
                     tracing::error!(

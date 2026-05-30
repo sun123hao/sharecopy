@@ -400,7 +400,12 @@ impl SyncEngine {
                 if let Err(e) = self.app_handle.emit("device-offline", &device_id) {
                     tracing::error!("发送 device-offline 事件失败: {}", e);
                 }
-                // 如果设备仍在 mDNS 发现列表中，尝试重连
+                // 立即发送 mDNS 查询，加速重新发现 + 尝试重连
+                if let Ok(mut discovery) = self.discovery.lock() {
+                    if let Err(e) = discovery.rebrowse() {
+                        tracing::debug!("断开后 rebrowse 失败: {}", e);
+                    }
+                }
                 self.try_reconnect_device(&device_id);
             }
         }
@@ -727,6 +732,13 @@ impl SyncEngine {
 
     /// 定期重连检查 + 清理过期数据
     fn periodic_reconnect_and_cleanup(&self) {
+        // 0. 主动发送 mDNS 查询，保持发现活跃
+        if let Ok(mut discovery) = self.discovery.lock() {
+            if let Err(e) = discovery.rebrowse() {
+                tracing::debug!("定期 rebrowse 失败: {}", e);
+            }
+        }
+
         // 1. 重连：在锁内收集需重连的设备 ID，释放锁后再执行
         let to_reconnect: Vec<String> = {
             if let Ok(discovery) = self.discovery.lock() {

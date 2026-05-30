@@ -143,10 +143,13 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   startupRefresh: async () => {
     await get().loadDevices();
-    // 主动刷新 mDNS，加速发现后启动的设备（如 Windows）
-    try { await commands.refreshDiscovery(); } catch (_) {}
-    for (const delay of [3000, 8000, 20000]) {
-      setTimeout(() => get().loadDevices(), delay);
+    // 多次主动刷新 mDNS 查询，加速发现后启动的设备（如 Windows）
+    // 每次刷新启动独立处理线程，10s 内收到的响应都会被正确处理
+    for (const delay of [0, 3000, 6000, 9000, 15000]) {
+      setTimeout(async () => {
+        try { await commands.refreshDiscovery(); } catch (_) {}
+        await get().loadDevices();
+      }, delay);
     }
   },
 }));
