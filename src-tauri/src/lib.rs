@@ -278,6 +278,14 @@ pub fn run() {
                 }
             };
 
+            // Android: 获取 WiFi Lock 防止休眠断开连接
+            #[cfg(target_os = "android")]
+            {
+                if let Err(e) = android_network::acquire_wifi_lock() {
+                    tracing::warn!("获取 WiFi Lock 失败: {}", e);
+                }
+            }
+
             // Android: 用 JNI 获取外部文件目录作为默认保存路径
             #[cfg(target_os = "android")]
             {

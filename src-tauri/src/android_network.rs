@@ -206,6 +206,91 @@ fn get_device_model_inner(jvm: &JavaVM) -> AppResult<String> {
     }
 }
 
+/// 获取 WiFi Lock，防止屏幕关闭后 WiFi 进入省电模式导致入站连接断开
+pub fn acquire_wifi_lock() -> AppResult<()> {
+    let jvm = get_jvm()?;
+    let mut env = jvm.attach_current_thread().map_err(|e| {
+        crate::error::AppError::Network(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            format!("JNI 线程附加失败: {}", e),
+        ))
+    })?;
+
+    let context = get_app_context(&mut env)?;
+
+    let svc_name = env
+        .get_static_field(
+            "android/content/Context",
+            "WIFI_SERVICE",
+            "Ljava/lang/String;",
+        )
+        .and_then(|v| v.l())
+        .map_err(|e| {
+            crate::error::AppError::Network(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                format!("WIFI_SERVICE: {}", e),
+            ))
+        })?;
+
+    let wifi_svc = env
+        .call_method(
+            &context,
+            "getSystemService",
+            "(Ljava/lang/String;)Ljava/lang/Object;",
+            &[JValue::Object(&svc_name)],
+        )
+        .and_then(|v| v.l())
+        .map_err(|e| {
+            crate::error::AppError::Network(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                format!("getSystemService(WIFI): {}", e),
+            ))
+        })?;
+
+    if wifi_svc.is_null() {
+        return Err(crate::error::AppError::Network(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            "WiFi 服务不可用",
+        )));
+    }
+
+    // 创建 WifiLock: WIFI_MODE_FULL_HIGH_PERF = 3
+    let tag = env.new_string("ShareCopy:WifiLock").map_err(|e| {
+        crate::error::AppError::Network(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            format!("new_string: {}", e),
+        ))
+    })?;
+
+    let lock = env
+        .call_method(
+            &wifi_svc,
+            "createWifiLock",
+            "(ILjava/lang/String;)Landroid/net/wifi/WifiManager$WifiLock;",
+            &[JValue::Int(3), JValue::Object(&tag)],
+        )
+        .and_then(|v| v.l())
+        .map_err(|e| {
+            crate::error::AppError::Network(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                format!("createWifiLock: {}", e),
+            ))
+        })?;
+
+    if !lock.is_null() {
+        env.call_method(&lock, "acquire", "()V", &[])
+            .map_err(|e| {
+                crate::error::AppError::Network(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    format!("wifiLock.acquire: {}", e),
+                ))
+            })?;
+        tracing::info!("WiFi Lock 已获取，防止 WiFi 休眠");
+    }
+
+    Ok(())
+}
+
 /// 获取 Android Application Context（内部使用）
 fn get_app_context<'a>(env: &mut jni::JNIEnv<'a>) -> AppResult<JObject<'a>> {
     let ath_cls = env
