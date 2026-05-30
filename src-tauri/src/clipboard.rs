@@ -99,10 +99,12 @@ impl ClipboardWatcher {
                 Ok(current_count) => {
                     let last_count = self.last_change_count.load(Ordering::Relaxed);
                     if current_count != last_count {
-                        self.last_change_count.store(current_count, Ordering::Relaxed);
-
+                        // 变更检测到了，尝试读取
                         match self.backend.read() {
                             Ok(content) => {
+                                // 读取成功后才更新计数器（避免读取失败消耗掉变更通知）
+                                self.last_change_count.store(current_count, Ordering::Relaxed);
+
                                 if content == ClipboardContent::None {
                                     continue;
                                 }
@@ -121,7 +123,9 @@ impl ClipboardWatcher {
                                 }
                             }
                             Err(e) => {
-                                tracing::error!("读取剪贴板失败: {}", e);
+                                // 读取失败（如 Android 后台限制），不更新计数器
+                                // 下次轮询会重试，直到成功读取
+                                tracing::debug!("读取剪贴板失败（将在下次轮询重试）: {}", e);
                             }
                         }
                     } else {

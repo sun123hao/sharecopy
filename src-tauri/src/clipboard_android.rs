@@ -5,11 +5,13 @@
 
 use jni::objects::{GlobalRef, JObject, JValue};
 use jni::JavaVM;
-use sha2::{Digest, Sha256};
-use std::sync::atomic::{AtomicU64};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::clipboard::{ClipboardBackend, ClipboardContent};
 use crate::error::AppResult;
+
+/// 剪贴板变更计数器（JNI 回调递增，change_count() 返回）
+static CLIP_CHANGE_COUNT: AtomicU64 = AtomicU64::new(0);
 
 pub struct AndroidClipboardBackend {
     jvm: JavaVM,
@@ -27,8 +29,11 @@ impl AndroidClipboardBackend {
             })?;
 
             // 通过 android.app.ActivityThread 获取 Application Context
-            // 这条路可能失败，尝试多种方式
             let context = get_app_context(&mut env)?;
+
+            // 注册剪贴板变更监听器（后台也可触发）
+            register_clipboard_listener(&mut env, &context)?;
+
             env.new_global_ref(context).map_err(|e| {
                 crate::error::AppError::Clipboard(format!("创建 GlobalRef 失败: {}", e))
             })?
@@ -211,14 +216,56 @@ impl ClipboardBackend for AndroidClipboardBackend {
     }
 
     fn change_count(&self) -> AppResult<u64> {
-        self.read().map(|content| {
-            let hash = content.content_hash();
-            let digest = Sha256::digest(hash.as_bytes());
-            let mut buf = [0u8; 8];
-            buf.copy_from_slice(&digest[..8]);
-            u64::from_be_bytes(buf)
-        })
+        // 返回由 OnPrimaryClipChangedListener 递增的计数器
+        // 后台也能检测变更，无需读剪贴板
+        Ok(CLIP_CHANGE_COUNT.load(Ordering::Relaxed))
     }
+}
+
+// ── 剪贴板监听器 (JNI 回调) ─────────────────
+
+/// JNI 导出的回调：Java 层 OnPrimaryClipChangedListener 触发时调用
+#[no_mangle]
+pub extern "system" fn Java_com_sharecopy_app_ClipboardListener_onClipboardChanged(
+    _env: jni::JNIEnv,
+    _class: jni::objects::JClass,
+) {
+    CLIP_CHANGE_COUNT.fetch_add(1, Ordering::Relaxed);
+}
+
+/// 注册剪贴板变更监听器（后台也能收到通知）
+fn register_clipboard_listener<'a>(
+    env: &mut jni::JNIEnv<'a>,
+    context: &JObject<'a>,
+) -> AppResult<()> {
+    let svc = get_clipboard_service(env, context)?;
+
+    // 创建 ClipboardListener 实例（在 Java 端需有对应的类）
+    let listener_cls = env
+        .find_class("com/sharecopy/app/ClipboardListener")
+        .map_err(|e| {
+            crate::error::AppError::Clipboard(format!("find_class ClipboardListener: {}", e))
+        })?;
+
+    let listener = env
+        .new_object(&listener_cls, "()V", &[])
+        .map_err(|e| {
+            crate::error::AppError::Clipboard(format!("new ClipboardListener: {}", e))
+        })?;
+
+    // ClipboardManager.addPrimaryClipChangedListener(listener)
+    env.call_method(
+        &svc,
+        "addPrimaryClipChangedListener",
+        "(Landroid/content/ClipboardManager$OnPrimaryClipChangedListener;)V",
+        &[JValue::Object(&listener)],
+    )
+    .map_err(|e| {
+        crate::error::AppError::Clipboard(format!("addPrimaryClipChangedListener: {}", e))
+    })?;
+
+    tracing::info!("剪贴板后台监听器已注册");
+    Ok(())
 }
 
 // ── JNI 辅助函数 ──────────────────────────────
