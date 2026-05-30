@@ -548,10 +548,11 @@ impl NetworkManager {
 
     /// 广播消息到所有已连接设备
     /// 至少有一个设备发送成功时返回 Ok，全部失败时返回 Err
+    /// 没有已连接设备时返回 NoConnection 错误
     pub fn broadcast(&self, message: &Message) -> AppResult<()> {
         let total = self.connections.len();
         if total == 0 {
-            return Ok(()); // 无连接设备，不是错误
+            return Err(AppError::NoConnection); // 无连接设备，调用方应缓存或等待
         }
         let encoded = message.encode()?;
         let mut success_count = 0u32;
@@ -575,6 +576,16 @@ impl NetworkManager {
         } else {
             Ok(())
         }
+    }
+
+    /// 获取已连接的设备 ID 列表
+    pub fn connected_device_ids(&self) -> Vec<String> {
+        self.connections.iter().map(|e| e.key().clone()).collect()
+    }
+
+    /// 检查指定设备是否已连接
+    pub fn is_connected(&self, device_id: &str) -> bool {
+        self.connections.contains_key(device_id)
     }
 
     /// 获取已连接设备数

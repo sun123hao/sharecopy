@@ -1,6 +1,7 @@
 use dashmap::DashMap;
 use mdns_sd::{ServiceDaemon, ServiceEvent, ServiceInfo};
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::broadcast;
 
 use crate::error::AppResult;
@@ -143,98 +144,20 @@ impl DiscoveryService {
             let event_tx = self.event_tx.clone();
             let my_device_id = self.device_id.clone();
 
+            // 克隆 ServiceDaemon 以便浏览器线程在出错时重新 browse
+            let mdns_daemon = self.mdns.clone();
+
             // 在单独线程中运行同步的 mDNS 事件循环
             std::thread::spawn(move || {
-            loop {
-                match rx.recv() {
-                    Ok(event) => match event {
-                        ServiceEvent::ServiceResolved(info) => {
-                            let device_id = info
-                                .get_property("device_id")
-                                .map(|v| {
-                                    let s = v.to_string();
-                                    s.strip_prefix("device_id=").unwrap_or(&s).to_string()
-                                })
-                                .unwrap_or_default();
-
-                            // 跳过本机（含 TXT 未就绪导致的空 ID）
-                            if device_id == my_device_id || device_id.is_empty() {
-                                continue;
-                            }
-
-                            let device_name = info
-                                .get_property("device_name")
-                                .map(|v| {
-                                    // 防御：mDNS 库可能返回 "key=value" 格式
-                                    let s = v.to_string();
-                                    s.strip_prefix("device_name=").unwrap_or(&s).to_string()
-                                })
-                                .unwrap_or_else(|| "未知设备".to_string());
-
-                            let platform = info
-                                .get_property("platform")
-                                .map(|v| v.to_string())
-                                .unwrap_or_else(|| "unknown".to_string());
-
-                            // 已存在则检查是否需要更新（改名检测）
-                            if let Some(existing) = devices.get(&device_id) {
-                                if existing.device_name == device_name
-                                    && existing.ip_address
-                                        == info.get_addresses().iter().next()
-                                            .map(|a| a.to_string())
-                                            .unwrap_or_default()
-                                {
-                                    continue; // 完全相同，跳过
-                                }
-                                // 设备信息有变化，更新并重新通知
-                            }
-
-                            let device = DiscoveredDevice {
-                                device_id: device_id.clone(),
-                                device_name,
-                                hostname: info.get_hostname().to_string(),
-                                platform,
-                                ip_address: info
-                                    .get_addresses()
-                                    .iter()
-                                    .next()
-                                    .map(|a| a.to_string())
-                                    .unwrap_or_default(),
-                                tcp_port: info.get_port(),
-                                last_seen: chrono::Utc::now(),
-                            };
-
-                            tracing::info!(
-                                "发现设备: {} ({}) @ {}:{}",
-                                device.device_name,
-                                device.platform,
-                                device.ip_address,
-                                device.tcp_port
-                            );
-
-                            let _ = event_tx.send(DiscoveryEvent::DeviceFound(device.clone()));
-                            devices.insert(device_id, device);
-                        }
-                        ServiceEvent::ServiceRemoved(_service_type, fullname) => {
-                            let device_id = fullname
-                                .strip_suffix(&format!(".{}", SERVICE_TYPE))
-                                .unwrap_or(&fullname);
-
-                            if device_id != my_device_id {
-                                tracing::info!("设备离线: {}", device_id);
-                                let _ = event_tx.send(DiscoveryEvent::DeviceLost(device_id.to_string()));
-                                devices.remove(device_id);
-                            }
-                        }
-                        _ => {}
-                    },
-                    Err(e) => {
-                        tracing::error!("mDNS 浏览错误: {}", e);
-                        break;
-                    }
-                }
-            }
-        });
+                // 使用 loop 包装，出错时可以重试 browse
+                Self::browse_loop(
+                    mdns_daemon,
+                    rx,
+                    devices,
+                    event_tx,
+                    my_device_id,
+                );
+            });
 
             Ok(())
         } else {
@@ -275,5 +198,172 @@ impl DiscoveryService {
     /// 获取在线设备数量
     pub fn device_count(&self) -> usize {
         self.discovered_devices.len()
+    }
+
+    /// 获取发现设备列表的引用（供外部使用）
+    pub fn discovered_devices_map(&self) -> &Arc<DashMap<String, DiscoveredDevice>> {
+        &self.discovered_devices
+    }
+
+    /// 清理超过指定秒数未更新的过期设备
+    pub fn clean_stale_devices(&self, max_age_secs: u64) -> Vec<String> {
+        let cutoff = chrono::Utc::now() - chrono::Duration::seconds(max_age_secs as i64);
+        let mut removed = Vec::new();
+        self.discovered_devices.retain(|id, device| {
+            if device.last_seen < cutoff {
+                tracing::info!("清理过期设备: {} ({}), 最后出现: {}", device.device_name, id, device.last_seen);
+                removed.push(id.clone());
+                false
+            } else {
+                true
+            }
+        });
+        removed
+    }
+}
+
+impl DiscoveryService {
+    /// mDNS 浏览器事件循环（独立函数，运行在单独线程中）
+    /// 出错时自动重试 browse，使用指数退避策略
+    fn browse_loop(
+        daemon: ServiceDaemon,
+        mut rx: mdns_sd::Receiver<ServiceEvent>,
+        devices: Arc<DashMap<String, DiscoveredDevice>>,
+        event_tx: broadcast::Sender<DiscoveryEvent>,
+        my_device_id: String,
+    ) {
+        let mut backoff_secs: u64 = 5; // 初始退避 5 秒
+        const MAX_BACKOFF_SECS: u64 = 60;
+
+        loop {
+            match rx.recv() {
+                Ok(event) => {
+                    // 成功收到事件时重置退避时间
+                    backoff_secs = 5;
+
+                    match event {
+                        ServiceEvent::ServiceResolved(info) => {
+                            let device_id = info
+                                .get_property("device_id")
+                                .map(|v| {
+                                    let s = v.to_string();
+                                    s.strip_prefix("device_id=").unwrap_or(&s).to_string()
+                                })
+                                .unwrap_or_default();
+
+                            // 跳过本机（含 TXT 未就绪导致的空 ID）
+                            if device_id == my_device_id || device_id.is_empty() {
+                                continue;
+                            }
+
+                            let device_name = info
+                                .get_property("device_name")
+                                .map(|v| {
+                                    let s = v.to_string();
+                                    s.strip_prefix("device_name=").unwrap_or(&s).to_string()
+                                })
+                                .unwrap_or_else(|| "未知设备".to_string());
+
+                            let platform = info
+                                .get_property("platform")
+                                .map(|v| v.to_string())
+                                .unwrap_or_else(|| "unknown".to_string());
+
+                            let ip_address = info
+                                .get_addresses()
+                                .iter()
+                                .next()
+                                .map(|a| a.to_string())
+                                .unwrap_or_default();
+
+                            let is_new_or_changed = if let Some(existing) = devices.get(&device_id)
+                            {
+                                // 检查是否需要重新通知（改名或 IP 变化）
+                                let changed = existing.device_name != device_name
+                                    || existing.ip_address != ip_address;
+                                // 释放读锁后更新 last_seen
+                                drop(existing);
+                                if let Some(mut existing) = devices.get_mut(&device_id) {
+                                    existing.last_seen = chrono::Utc::now();
+                                }
+                                changed
+                            } else {
+                                true // 新设备
+                            };
+
+                            if !is_new_or_changed {
+                                continue; // 设备未变化且已更新 last_seen，无需重新通知
+                            }
+
+                            let device = DiscoveredDevice {
+                                device_id: device_id.clone(),
+                                device_name,
+                                hostname: info.get_hostname().to_string(),
+                                platform,
+                                ip_address,
+                                tcp_port: info.get_port(),
+                                last_seen: chrono::Utc::now(),
+                            };
+
+                            tracing::info!(
+                                "发现设备: {} ({}) @ {}:{}",
+                                device.device_name,
+                                device.platform,
+                                device.ip_address,
+                                device.tcp_port
+                            );
+
+                            let _ =
+                                event_tx.send(DiscoveryEvent::DeviceFound(device.clone()));
+                            devices.insert(device_id, device);
+                        }
+                        ServiceEvent::ServiceRemoved(_service_type, fullname) => {
+                            let device_id = fullname
+                                .strip_suffix(&format!(".{}", SERVICE_TYPE))
+                                .unwrap_or(&fullname);
+
+                            if device_id != my_device_id {
+                                tracing::info!("设备离线: {}", device_id);
+                                let _ = event_tx
+                                    .send(DiscoveryEvent::DeviceLost(device_id.to_string()));
+                                devices.remove(device_id);
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                Err(e) => {
+                    tracing::error!(
+                        "mDNS 浏览错误: {}, {} 秒后重试",
+                        e,
+                        backoff_secs
+                    );
+                    std::thread::sleep(Duration::from_secs(backoff_secs));
+
+                    // 尝试停止旧浏览器（忽略错误，可能已经停止）
+                    if let Err(e) = daemon.stop_browse(SERVICE_TYPE) {
+                        tracing::debug!("stop_browse 失败（可能已停止）: {}", e);
+                    }
+
+                    // 重新浏览
+                    match daemon.browse(SERVICE_TYPE) {
+                        Ok(new_rx) => {
+                            tracing::info!("mDNS 浏览器已重新启动");
+                            rx = new_rx;
+                            // 指数退避，上限 MAX_BACKOFF_SECS
+                            backoff_secs =
+                                std::cmp::min(backoff_secs * 2, MAX_BACKOFF_SECS);
+                        }
+                        Err(e) => {
+                            tracing::error!(
+                                "mDNS 重新浏览失败: {}, 浏览器线程退出",
+                                e
+                            );
+                            break;
+                        }
+                    }
+                }
+            }
+        }
     }
 }

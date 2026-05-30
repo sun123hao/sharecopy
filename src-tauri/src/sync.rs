@@ -1,10 +1,12 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::time::Instant;
 use tauri::{AppHandle, Emitter};
 use tokio::sync::mpsc;
 
 use crate::clipboard::{ClipboardContent, ClipboardWatcher};
 use crate::discovery::{DiscoveryEvent, DiscoveryService};
+use crate::error::AppError;
 use crate::network::{NetworkEvent, NetworkManager};
 use crate::protocol::{ClipboardImageChunkPayload, ClipboardImagePayload, ClipboardTextPayload, ImageFormat, Message};
 use crate::transfer::FileTransferManager;
@@ -42,6 +44,7 @@ struct ImageChunkAssembler {
     total_chunks: u16,
     chunks: Vec<Option<Vec<u8>>>,
     received: u16,
+    created_at: Instant,
 }
 
 impl ImageChunkAssembler {
@@ -53,6 +56,7 @@ impl ImageChunkAssembler {
             total_chunks,
             chunks: (0..total_chunks).map(|_| None).collect(),
             received: 0,
+            created_at: Instant::now(),
         }
     }
 
@@ -91,6 +95,8 @@ pub struct SyncEngine {
     image_assemblers: Arc<parking_lot::Mutex<Vec<ImageChunkAssembler>>>,
     /// 无连接时缓存的最新剪贴板内容，设备连接后立即广播
     pending_clipboard: Arc<parking_lot::Mutex<Option<(ClipboardContent, String, std::time::Instant)>>>,
+    /// 重连退避追踪：记录每个设备的上次重连时间
+    reconnect_backoff: Arc<dashmap::DashMap<String, (Instant, u32)>>, // (上次重连时间, 当前退避级别)
     app_handle: AppHandle,
 }
 
@@ -114,6 +120,7 @@ impl SyncEngine {
             history: Arc::new(parking_lot::Mutex::new(Vec::new())),
             image_assemblers: Arc::new(parking_lot::Mutex::new(Vec::new())),
             pending_clipboard: Arc::new(parking_lot::Mutex::new(None)),
+            reconnect_backoff: Arc::new(dashmap::DashMap::new()),
             app_handle,
         }
     }
@@ -125,6 +132,16 @@ impl SyncEngine {
         mut network_rx: mpsc::UnboundedReceiver<NetworkEvent>,
         mut discovery_rx: tokio::sync::broadcast::Receiver<DiscoveryEvent>,
     ) {
+        // 定期重连 + 清理定时器（15s，首次 tick 加少量随机延迟避免雷同）
+        let jitter_ms = (std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .subsec_nanos()
+            % 5000) as u64;
+        let mut reconnect_timer = tokio::time::interval(
+            tokio::time::Duration::from_secs(15) + tokio::time::Duration::from_millis(jitter_ms),
+        );
+
         loop {
             tokio::select! {
                 // 本地剪贴板变化 → 广播
@@ -144,15 +161,23 @@ impl SyncEngine {
                     }
                     Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
                         tracing::warn!("设备发现事件滞后 {} 条，继续运行", n);
-                        // Lagged 后可恢复，继续循环
                     }
                     Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                },
+                // 定期重连检查 + 清理
+                _ = reconnect_timer.tick() => {
+                    self.periodic_reconnect_and_cleanup();
                 },
             }
         }
     }
 
     async fn handle_local_clipboard_change(&self, content: ClipboardContent) {
+        // ClipboardContent::None 无需处理
+        if matches!(&content, ClipboardContent::None) {
+            return;
+        }
+
         // 记录到历史
         match &content {
             ClipboardContent::Text(t) => {
@@ -162,16 +187,19 @@ impl SyncEngine {
                 let b64 = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, data);
                 self.add_history_entry("image", &b64, "本机");
             }
-            ClipboardContent::None => {}
+            ClipboardContent::None => unreachable!(),
         }
 
         // 无连接时缓存内容，设备连上后立即广播（带时间戳）
         if self.network.connected_count() == 0 {
             let hash = content.content_hash();
             *self.pending_clipboard.lock() = Some((content, hash, std::time::Instant::now()));
+            tracing::debug!("无连接设备，剪贴板内容已缓存");
             return;
         }
 
+        // 提前计算 hash（content 后续会被 match 消耗/部分移动）
+        let content_hash = content.content_hash();
         let is_text = matches!(&content, ClipboardContent::Text(_));
         let is_image = matches!(&content, ClipboardContent::Image { .. });
 
@@ -200,10 +228,10 @@ impl SyncEngine {
                     return;
                 }
             }
-            ClipboardContent::None => return,
+            ClipboardContent::None => unreachable!(),
         };
 
-        // 广播成功后递增统计
+        // 广播，无连接时回退到缓存路径
         match self.network.broadcast(&msg) {
             Ok(()) => {
                 if is_text {
@@ -212,18 +240,45 @@ impl SyncEngine {
                     self.stats.lock().images_synced += 1;
                 }
             }
+            Err(AppError::NoConnection) => {
+                // 广播时刚好连接断开，从原始消息重建内容以缓存
+                tracing::debug!("广播时无连接，尝试从消息重建缓存");
+                let cached = Self::content_from_message(&msg);
+                if let Some(c) = cached {
+                    *self.pending_clipboard.lock() = Some((c, content_hash, std::time::Instant::now()));
+                }
+            }
             Err(e) => {
                 tracing::error!("广播剪贴板内容失败: {}", e);
             }
         }
     }
 
+    /// 从 Message 反向重建 ClipboardContent（仅用于缓存回退）
+    fn content_from_message(msg: &Message) -> Option<ClipboardContent> {
+        match msg {
+            Message::ClipboardText(p) => Some(ClipboardContent::Text(p.content.clone())),
+            Message::ClipboardImage(p) => Some(ClipboardContent::Image {
+                width: p.width,
+                height: p.height,
+                data: p.data.clone(),
+            }),
+            _ => None,
+        }
+    }
+
     async fn send_image_in_chunks(&self, width: u32, height: u32, data: &[u8]) {
-        self.stats.lock().images_synced += 1;
+        // 无连接时直接返回，不递增统计
+        if self.network.connected_count() == 0 {
+            tracing::debug!("无连接设备，跳过大图片分块发送");
+            return;
+        }
+
         let transfer_id = uuid::Uuid::new_v4().to_string();
         let total_chunks = (data.len() + IMAGE_CHUNK_SIZE - 1) / IMAGE_CHUNK_SIZE;
         let total_chunks = total_chunks.min(u16::MAX as usize) as u16;
 
+        let mut any_success = false;
         for i in 0..total_chunks {
             let start = i as usize * IMAGE_CHUNK_SIZE;
             let end = std::cmp::min(start + IMAGE_CHUNK_SIZE, data.len());
@@ -240,9 +295,21 @@ impl SyncEngine {
                 timestamp: chrono::Utc::now().timestamp_millis() as u64,
             });
 
-            if let Err(e) = self.network.broadcast(&msg) {
-                tracing::error!("广播图片块 {}/{} 失败: {}", i, total_chunks, e);
+            match self.network.broadcast(&msg) {
+                Ok(()) => any_success = true,
+                Err(AppError::NoConnection) => {
+                    tracing::debug!("大图片分块广播时无连接，中断发送");
+                    break;
+                }
+                Err(e) => {
+                    tracing::error!("广播图片块 {}/{} 失败: {}", i, total_chunks, e);
+                }
             }
+        }
+
+        // 至少一个 chunk 发送成功才递增统计
+        if any_success {
+            self.stats.lock().images_synced += 1;
         }
     }
 
@@ -314,6 +381,8 @@ impl SyncEngine {
                 if let Err(e) = self.app_handle.emit("device-offline", &device_id) {
                     tracing::error!("发送 device-offline 事件失败: {}", e);
                 }
+                // 如果设备仍在 mDNS 发现列表中，尝试重连
+                self.try_reconnect_device(&device_id);
             }
         }
     }
@@ -453,6 +522,10 @@ impl SyncEngine {
                                         timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                     });
                                     if let Err(e) = engine_network.broadcast(&msg) {
+                                        if matches!(&e, AppError::NoConnection) {
+                                            tracing::debug!("缓存图片分块广播时无连接，中断");
+                                            break;
+                                        }
                                         tracing::error!(
                                             "广播缓存图片块 {}/{} 失败: {}",
                                             i, total_chunks, e
@@ -468,6 +541,135 @@ impl SyncEngine {
             };
             if let Err(e) = self.network.broadcast(&msg) {
                 tracing::error!("广播缓存的剪贴板内容失败: {}", e);
+            }
+        }
+    }
+
+    // ── 重连逻辑 ──────────────────────────
+
+    /// 尝试重连已发现的设备（带指数退避）
+    fn try_reconnect_device(&self, device_id: &str) {
+        // 检查是否仍在 mDNS 发现列表中
+        let device = {
+            if let Ok(discovery) = self.discovery.lock() {
+                discovery.list_devices().into_iter().find(|d| d.device_id == device_id)
+            } else {
+                None
+            }
+        };
+
+        let Some(device) = device else {
+            tracing::debug!("设备 {} 不在发现列表中，跳过重连", device_id);
+            return;
+        };
+
+        // 检查是否已连接（可能已由对端重新连接）
+        if self.network.is_connected(device_id) {
+            return;
+        }
+
+        // 指数退避：根据上次重连时间决定是否允许此次重连
+        let now = Instant::now();
+        if let Some(entry) = self.reconnect_backoff.get(device_id) {
+            let (last_attempt, level) = entry.value().clone();
+            let backoff_duration = std::time::Duration::from_secs(
+                std::cmp::min(2u64.saturating_pow(level), 60), // 2^level 秒，上限 60s
+            );
+            if now - last_attempt < backoff_duration {
+                tracing::debug!(
+                    "设备 {} 重连退避中 (级别 {}, 还需等待)",
+                    device_id,
+                    level
+                );
+                return;
+            }
+        }
+
+        // 执行重连
+        let device_clone = device.clone();
+        let network = self.network.clone();
+        let devices_map = self.reconnect_backoff.clone();
+        let device_id_owned = device_id.to_string();
+
+        tokio::spawn(async move {
+            tracing::info!("尝试重连设备: {} ({})", device_clone.device_name, device_id_owned);
+            match network.connect_to_device(&device_clone).await {
+                Ok(()) => {
+                    tracing::info!("重连设备成功: {}", device_clone.device_name);
+                    // 成功后清除退避记录
+                    devices_map.remove(&device_id_owned);
+                }
+                Err(e) => {
+                    tracing::warn!("重连设备失败: {} ({})", device_clone.device_name, e);
+                    // 更新退避级别
+                    devices_map
+                        .entry(device_id_owned)
+                        .and_modify(|(last, level)| {
+                            *last = Instant::now();
+                            *level = std::cmp::min(level.saturating_add(1), 10); // 最高 2^10 = 1024s
+                        })
+                        .or_insert((Instant::now(), 0));
+                }
+            }
+        });
+    }
+
+    /// 定期重连检查 + 清理过期数据
+    fn periodic_reconnect_and_cleanup(&self) {
+        // 1. 重连：遍历发现列表中的设备，对未连接的尝试重连
+        if let Ok(discovery) = self.discovery.lock() {
+            for device in discovery.list_devices() {
+                // 跳过本机
+                if device.device_id == self.device_id {
+                    continue;
+                }
+                // 跳过已连接的设备
+                if self.network.is_connected(&device.device_id) {
+                    continue;
+                }
+                // 跳过超过 120s 未更新的设备（可能已离线）
+                let age = chrono::Utc::now() - device.last_seen;
+                if age > chrono::Duration::seconds(120) {
+                    continue;
+                }
+                // 触发重连（内部有退避机制）
+                self.try_reconnect_device(&device.device_id);
+            }
+        }
+
+        // 2. 清理过期 mDNS 设备（超过 300s 未更新）
+        if let Ok(discovery) = self.discovery.lock() {
+            let removed = discovery.clean_stale_devices(300);
+            for device_id in &removed {
+                // 同步清理 connections 中的残留条目
+                self.reconnect_backoff.remove(device_id);
+            }
+            if !removed.is_empty() {
+                tracing::info!("清理了 {} 个过期设备", removed.len());
+            }
+        }
+
+        // 3. 清理超过 60s 未完成的图片组装器（防止内存泄漏）
+        {
+            let mut assemblers = self.image_assemblers.lock();
+            let before = assemblers.len();
+            let timeout = std::time::Duration::from_secs(60);
+            assemblers.retain(|a| {
+                let keep = a.received < a.total_chunks
+                    && a.created_at.elapsed() < timeout;
+                if !keep && a.received < a.total_chunks {
+                    tracing::debug!(
+                        "清理超时图片组装器: transfer_id={}, received={}/{}, age={:?}",
+                        a.transfer_id,
+                        a.received,
+                        a.total_chunks,
+                        a.created_at.elapsed()
+                    );
+                }
+                keep
+            });
+            if assemblers.len() != before {
+                tracing::debug!("清理了 {} 个陈旧图片组装器", before - assemblers.len());
             }
         }
     }

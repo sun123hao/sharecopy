@@ -29,6 +29,9 @@ pub enum AppError {
     #[error("校验和不匹配: 期望 {expected}, 实际 {actual}")]
     ChecksumMismatch { expected: String, actual: String },
 
+    #[error("无连接设备")]
+    NoConnection,
+
     #[error("通道发送失败")]
     ChannelSend,
 }
