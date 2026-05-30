@@ -184,6 +184,18 @@ impl DiscoveryService {
         Ok(())
     }
 
+    /// 重新发送 mDNS 查询（不重启浏览器，仅发送新查询包）
+    pub fn rebrowse(&self) -> AppResult<()> {
+        self.mdns
+            .browse(SERVICE_TYPE)
+            .map(|_rx| {
+                tracing::debug!("mDNS rebrowse 已发送");
+            })
+            .map_err(|e| {
+                crate::error::AppError::Discovery(format!("mDNS rebrowse 失败: {}", e))
+            })
+    }
+
     /// 订阅发现事件
     pub fn subscribe(&self) -> broadcast::Receiver<DiscoveryEvent> {
         self.event_tx.subscribe()

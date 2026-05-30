@@ -492,12 +492,30 @@ impl SyncEngine {
 
                 if should_connect {
                     let device_name = device.device_name.clone();
-                    match self.network.connect_to_device(&device).await {
-                        Ok(()) => {}
-                        Err(e) => {
-                            tracing::warn!("连接设备 {} 失败: {}", device_name, e);
+                    let dev = device.clone();
+                    let network = self.network.clone();
+                    // 后台重试：Windows TCP 可能尚未就绪，快速重试避免等 15s 周期
+                    tokio::spawn(async move {
+                        let retry_delays = [0u64, 2, 5, 10];
+                        for &delay in &retry_delays {
+                            if delay > 0 {
+                                tokio::time::sleep(tokio::time::Duration::from_secs(delay)).await;
+                            }
+                            if network.is_connected(&dev.device_id) {
+                                return; // 已连接（可能由对方发起）
+                            }
+                            match network.connect_to_device(&dev).await {
+                                Ok(()) => {
+                                    tracing::info!("连接 {} 成功", dev.device_name);
+                                    return;
+                                }
+                                Err(e) => {
+                                    tracing::debug!("连接 {} 失败(重试 {}s): {}", dev.device_name, delay, e);
+                                }
+                            }
                         }
-                    }
+                        tracing::warn!("连接 {} 最终失败", device_name);
+                    });
                 } else {
                     tracing::debug!(
                         "设备 {} 等待对方主动连接（30s 超时后回退）",
@@ -806,13 +824,9 @@ impl SyncEngine {
     /// 主动刷新 mDNS 发现（发送新查询，加速发现后启动的设备）
     pub fn refresh_discovery(&self) {
         if let Ok(mut discovery) = self.discovery.lock() {
-            if let Err(e) = discovery.stop() {
-                tracing::warn!("停止旧 mDNS 失败: {}", e);
-            }
-            if let Err(e) = discovery.start() {
-                tracing::warn!("重新启动 mDNS 发现失败: {}", e);
-            } else {
-                tracing::info!("mDNS 发现已刷新");
+            // 不重启浏览器，仅在当前 browser 基础上重新 browse
+            if let Err(e) = discovery.rebrowse() {
+                tracing::warn!("mDNS rebrowse 失败: {}", e);
             }
         }
     }
