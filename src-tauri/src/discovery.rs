@@ -89,38 +89,7 @@ impl DiscoveryService {
     /// 启动 mDNS 服务注册 + 浏览器
     pub fn start(&mut self) -> AppResult<()> {
         // 注册本机服务
-        let txt_properties = [
-            ("device_id", self.device_id.as_str()),
-            ("device_name", self.device_name.as_str()),
-            ("platform", self.platform.as_str()),
-            ("tcp_port", &self.tcp_port.to_string()),
-        ];
-
-        // 获取本机 IP（优先使用手动指定的 IP，Android 上通过 JNI 获取）
-        let my_ip = self.my_ip.unwrap_or_else(|| {
-            if_addrs::get_if_addrs()
-                .ok()
-                .and_then(|ifaces| {
-                    ifaces
-                        .into_iter()
-                        .find(|i| !i.is_loopback() && matches!(i.addr, if_addrs::IfAddr::V4(_)))
-                        .map(|i| i.ip())
-                })
-                .unwrap_or_else(|| std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST))
-        });
-
-        let service_info = ServiceInfo::new(
-            SERVICE_TYPE,
-            &self.service_name,
-            &self.hostname,
-            my_ip,
-            self.tcp_port,
-            &txt_properties[..],
-        )
-        .map_err(|e| {
-            crate::error::AppError::Discovery(format!("创建 ServiceInfo 失败: {}", e))
-        })?;
-
+        let service_info = self.build_service_info()?;
         self.mdns
             .register(service_info)
             .map_err(|e| crate::error::AppError::Discovery(format!("注册 mDNS 服务失败: {}", e)))?;
@@ -184,8 +153,58 @@ impl DiscoveryService {
         Ok(())
     }
 
-    /// 重新发送 mDNS 查询（启动独立线程处理返回事件，10s 后自动退出）
+    /// 构造本机 mDNS 服务信息
+    fn build_service_info(&self) -> Result<ServiceInfo, crate::error::AppError> {
+        let txt_properties = [
+            ("device_id", self.device_id.as_str()),
+            ("device_name", self.device_name.as_str()),
+            ("platform", self.platform.as_str()),
+            ("tcp_port", &self.tcp_port.to_string()),
+        ];
+
+        let my_ip = self.my_ip.unwrap_or_else(|| {
+            if_addrs::get_if_addrs()
+                .ok()
+                .and_then(|ifaces| {
+                    ifaces
+                        .into_iter()
+                        .find(|i| !i.is_loopback() && matches!(i.addr, if_addrs::IfAddr::V4(_)))
+                        .map(|i| i.ip())
+                })
+                .unwrap_or_else(|| std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST))
+        });
+
+        ServiceInfo::new(
+            SERVICE_TYPE,
+            &self.service_name,
+            &self.hostname,
+            my_ip,
+            self.tcp_port,
+            &txt_properties[..],
+        )
+        .map_err(|e| {
+            crate::error::AppError::Discovery(format!("创建 ServiceInfo 失败: {}", e))
+        })
+    }
+
+    /// 重新宣告 mDNS 服务（强制刷新 SRV/TXT 公告，解决 Windows mdns-sd 响应问题）
+    pub fn reannounce(&mut self) -> AppResult<()> {
+        let service_info = self.build_service_info()?;
+        self.mdns
+            .register(service_info)
+            .map_err(|e| crate::error::AppError::Discovery(format!("重新宣告 mDNS 失败: {}", e)))?;
+        tracing::debug!("mDNS 服务已重新宣告");
+        Ok(())
+    }
+
+    /// 重新发送 mDNS 查询 + 重新宣告本机服务
+    /// 启动独立线程处理返回事件，10s 后自动退出
     pub fn rebrowse(&mut self) -> AppResult<()> {
+        // 重新宣告本机服务（强制刷新 SRV/TXT，解决 Windows mdns-sd 响应延迟）
+        if let Err(e) = self.reannounce() {
+            tracing::debug!("rebrowse 中重新宣告失败: {}", e);
+        }
+
         let rx = self
             .mdns
             .browse(SERVICE_TYPE)
