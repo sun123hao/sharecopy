@@ -45,9 +45,15 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   loadDevices: async () => {
     try {
-      const devices = await commands.getDevices();
-      // 直接替换设备列表（后端已过滤为 TCP 已连接设备）
-      set({ devices: devices as unknown as DiscoveredDevice[] });
+      const backendDevices = await commands.getDevices() as DiscoveredDevice[];
+      set((state) => {
+        const backendIds = new Set(backendDevices.map((d) => d.device_id));
+        // 保留通过 device-online 事件添加且不在后端结果中的设备
+        const keptOnline = state.devices.filter(
+          (d) => !backendIds.has(d.device_id) && (d as any).__online
+        );
+        return { devices: [...backendDevices, ...keptOnline] };
+      });
     } catch (e) {
       console.error('加载设备列表失败:', e);
     }
@@ -89,15 +95,16 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   addDevice: (device: DiscoveredDevice) => {
     set((state) => {
+      const withOnline = { ...device, __online: true } as DiscoveredDevice & { __online: boolean };
       const exists = state.devices.find((d) => d.device_id === device.device_id);
       if (exists) {
         return {
           devices: state.devices.map((d) =>
-            d.device_id === device.device_id ? device : d
+            d.device_id === device.device_id ? withOnline : d
           ),
         };
       }
-      return { devices: [...state.devices, device] };
+      return { devices: [...state.devices, withOnline] };
     });
   },
 
