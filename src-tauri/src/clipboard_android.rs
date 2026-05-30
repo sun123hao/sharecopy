@@ -5,6 +5,7 @@
 
 use jni::objects::{GlobalRef, JObject, JValue};
 use jni::JavaVM;
+use sha2::{Digest, Sha256};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::clipboard::{ClipboardBackend, ClipboardContent};
@@ -31,8 +32,7 @@ impl AndroidClipboardBackend {
             // 通过 android.app.ActivityThread 获取 Application Context
             let context = get_app_context(&mut env)?;
 
-            // 注册剪贴板变更监听器（后台也可触发）
-            register_clipboard_listener(&mut env, &context)?;
+            // 剪贴板变更通过轮询检测（change_count 含时间戳，前台/后台切换时能感知）
 
             env.new_global_ref(context).map_err(|e| {
                 crate::error::AppError::Clipboard(format!("创建 GlobalRef 失败: {}", e))
@@ -216,56 +216,40 @@ impl ClipboardBackend for AndroidClipboardBackend {
     }
 
     fn change_count(&self) -> AppResult<u64> {
-        // 返回由 OnPrimaryClipChangedListener 递增的计数器
-        // 后台也能检测变更，无需读剪贴板
-        Ok(CLIP_CHANGE_COUNT.load(Ordering::Relaxed))
+        // 监听器计数器优先（由 OnPrimaryClipChangedListener 递增）
+        let count = CLIP_CHANGE_COUNT.load(Ordering::Relaxed);
+        if count > 0 {
+            return Ok(count);
+        }
+
+        // 回退轮询：读剪贴板算 hash
+        match self.read() {
+            Ok(ClipboardContent::None) => {
+                // 剪贴板为空或后台不可访问 → 用 5 秒时间桶确保定期重试
+                Ok(std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs()
+                    / 5)
+            }
+            Ok(content) => {
+                // 剪贴板可访问 → 计算 hash
+                let hash = content.content_hash();
+                let digest = Sha256::digest(hash.as_bytes());
+                let mut buf = [0u8; 8];
+                buf.copy_from_slice(&digest[..8]);
+                Ok(u64::from_be_bytes(buf))
+            }
+            Err(_) => {
+                // 读取异常 → 用时间桶
+                Ok(std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs()
+                    / 5)
+            }
+        }
     }
-}
-
-// ── 剪贴板监听器 (JNI 回调) ─────────────────
-
-/// JNI 导出的回调：Java 层 OnPrimaryClipChangedListener 触发时调用
-#[no_mangle]
-pub extern "system" fn Java_com_sharecopy_app_ClipboardListener_onClipboardChanged(
-    _env: jni::JNIEnv,
-    _class: jni::objects::JClass,
-) {
-    CLIP_CHANGE_COUNT.fetch_add(1, Ordering::Relaxed);
-}
-
-/// 注册剪贴板变更监听器（后台也能收到通知）
-fn register_clipboard_listener<'a>(
-    env: &mut jni::JNIEnv<'a>,
-    context: &JObject<'a>,
-) -> AppResult<()> {
-    let svc = get_clipboard_service(env, context)?;
-
-    // 创建 ClipboardListener 实例（在 Java 端需有对应的类）
-    let listener_cls = env
-        .find_class("com/sharecopy/app/ClipboardListener")
-        .map_err(|e| {
-            crate::error::AppError::Clipboard(format!("find_class ClipboardListener: {}", e))
-        })?;
-
-    let listener = env
-        .new_object(&listener_cls, "()V", &[])
-        .map_err(|e| {
-            crate::error::AppError::Clipboard(format!("new ClipboardListener: {}", e))
-        })?;
-
-    // ClipboardManager.addPrimaryClipChangedListener(listener)
-    env.call_method(
-        &svc,
-        "addPrimaryClipChangedListener",
-        "(Landroid/content/ClipboardManager$OnPrimaryClipChangedListener;)V",
-        &[JValue::Object(&listener)],
-    )
-    .map_err(|e| {
-        crate::error::AppError::Clipboard(format!("addPrimaryClipChangedListener: {}", e))
-    })?;
-
-    tracing::info!("剪贴板后台监听器已注册");
-    Ok(())
 }
 
 // ── JNI 辅助函数 ──────────────────────────────
