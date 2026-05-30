@@ -455,12 +455,21 @@ impl SyncEngine {
     async fn handle_discovery_event(&self, event: DiscoveryEvent) {
         match event {
             DiscoveryEvent::DeviceFound(device) => {
-                let device_name = device.device_name.clone();
-                match self.network.connect_to_device(&device).await {
-                    Ok(()) => {}
-                    Err(e) => {
-                        tracing::warn!("连接设备 {} 失败: {}", device_name, e);
+                // 双向对称发现时，只有 device_id 较大的一端主动发起 TCP 连接
+                // 避免双向连接互相覆盖 sender 导致数据流断裂
+                if device.device_id > self.device_id {
+                    let device_name = device.device_name.clone();
+                    match self.network.connect_to_device(&device).await {
+                        Ok(()) => {}
+                        Err(e) => {
+                            tracing::warn!("连接设备 {} 失败: {}", device_name, e);
+                        }
                     }
+                } else {
+                    tracing::debug!(
+                        "设备 {} 的 device_id 较小，等待对方主动连接",
+                        device.device_name
+                    );
                 }
             }
             DiscoveryEvent::DeviceLost(_device_id) => {
