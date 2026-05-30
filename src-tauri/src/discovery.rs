@@ -190,28 +190,54 @@ impl DiscoveryService {
         })
     }
 
-    /// 重新宣告 mDNS 服务（先注销再注册，强制刷新 SRV/TXT 公告）
-    /// 限频：至少间隔 60 秒，避免其他设备看到反复上下线
+    /// 重新宣告 mDNS 服务（TXT 中加时间戳触发更新公告，不注销避免 UI 闪烁）
+    /// 限频：至少间隔 60 秒
     pub fn reannounce(&mut self) -> AppResult<()> {
         let now = std::time::Instant::now();
         if let Some(last) = self.last_reannounce {
             if now - last < std::time::Duration::from_secs(60) {
-                return Ok(()); // 未到间隔，跳过
+                return Ok(());
             }
         }
         self.last_reannounce = Some(now);
 
-        // 先注销旧服务（强制其他设备清除缓存）
-        let fullname = format!("{}.{}", self.service_name, SERVICE_TYPE);
-        if let Err(e) = self.mdns.unregister(&fullname) {
-            tracing::debug!("reannounce 注销旧服务失败: {}", e);
-        }
-        // 立即重新注册（触发完整的 mDNS 公告含 SRV/TXT）
-        let service_info = self.build_service_info()?;
+        // 构造带时间戳的 TXT 属性（mdns-sd 检测到变化会发送更新公告）
+        let txt_properties = [
+            ("device_id", self.device_id.as_str()),
+            ("device_name", self.device_name.as_str()),
+            ("platform", self.platform.as_str()),
+            ("tcp_port", &self.tcp_port.to_string()),
+            ("ts", &chrono::Utc::now().timestamp().to_string()), // 时间戳强制触发更新
+        ];
+
+        let my_ip = self.my_ip.unwrap_or_else(|| {
+            if_addrs::get_if_addrs()
+                .ok()
+                .and_then(|ifaces| {
+                    ifaces
+                        .into_iter()
+                        .find(|i| !i.is_loopback() && matches!(i.addr, if_addrs::IfAddr::V4(_)))
+                        .map(|i| i.ip())
+                })
+                .unwrap_or_else(|| std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST))
+        });
+
+        let service_info = ServiceInfo::new(
+            SERVICE_TYPE,
+            &self.service_name,
+            &self.hostname,
+            my_ip,
+            self.tcp_port,
+            &txt_properties[..],
+        )
+        .map_err(|e| {
+            crate::error::AppError::Discovery(format!("创建 ServiceInfo 失败: {}", e))
+        })?;
+
         self.mdns
             .register(service_info)
-            .map_err(|e| crate::error::AppError::Discovery(format!("重新注册 mDNS 失败: {}", e)))?;
-        tracing::debug!("mDNS 服务已重新宣告");
+            .map_err(|e| crate::error::AppError::Discovery(format!("重新宣告 mDNS 失败: {}", e)))?;
+        tracing::debug!("mDNS 服务已更新宣告");
         Ok(())
     }
 
