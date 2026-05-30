@@ -114,26 +114,11 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: 设置 Android SDK
+      - name: 设置 Android SDK（使用 runner 预装）
         run: |
-          mkdir -p $HOME/android-sdk/cmdline-tools
-          cd $HOME/android-sdk
-          curl -sLo cmdline-tools.zip https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip
-          unzip -qo cmdline-tools.zip
-          mv cmdline-tools latest
-          mkdir -p cmdline-tools
-          mv latest cmdline-tools/
-          echo "ANDROID_HOME=$HOME/android-sdk" >> $GITHUB_ENV
-          echo "$HOME/android-sdk/cmdline-tools/latest/bin" >> $GITHUB_PATH
-
-      - name: 安装 Android SDK 组件
-        run: |
-          yes | sdkmanager --licenses
-          sdkmanager "platforms;android-34" "build-tools;34.0.0" "ndk;27.0.12077973"
-
-      - name: 设置 NDK 环境变量
-        run: |
-          echo "NDK_HOME=$ANDROID_HOME/ndk/27.0.12077973" >> $GITHUB_ENV
+          echo "ANDROID_HOME=$ANDROID_SDK_ROOT" >> $GITHUB_ENV
+          echo "NDK_HOME=$ANDROID_SDK_ROOT/ndk/27.0.12077973" >> $GITHUB_ENV
+          yes | $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager "ndk;27.0.12077973" || true
 
       - name: 安装依赖
         run: npm ci
@@ -173,26 +158,11 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: 设置 Android SDK
+      - name: 设置 Android SDK（使用 runner 预装）
         run: |
-          mkdir -p $HOME/android-sdk/cmdline-tools
-          cd $HOME/android-sdk
-          curl -sLo cmdline-tools.zip https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip
-          unzip -qo cmdline-tools.zip
-          mv cmdline-tools latest
-          mkdir -p cmdline-tools
-          mv latest cmdline-tools/
-          echo "ANDROID_HOME=$HOME/android-sdk" >> $GITHUB_ENV
-          echo "$HOME/android-sdk/cmdline-tools/latest/bin" >> $GITHUB_PATH
-
-      - name: 安装 Android SDK 组件
-        run: |
-          yes | sdkmanager --licenses
-          sdkmanager "platforms;android-34" "build-tools;34.0.0" "ndk;27.0.12077973"
-
-      - name: 设置 NDK 环境变量
-        run: |
-          echo "NDK_HOME=$ANDROID_HOME/ndk/27.0.12077973" >> $GITHUB_ENV
+          echo "ANDROID_HOME=$ANDROID_SDK_ROOT" >> $GITHUB_ENV
+          echo "NDK_HOME=$ANDROID_SDK_ROOT/ndk/27.0.12077973" >> $GITHUB_ENV
+          yes | $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager "ndk;27.0.12077973" || true
 
       - name: 安装依赖
         run: npm ci

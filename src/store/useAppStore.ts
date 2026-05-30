@@ -46,15 +46,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   loadDevices: async () => {
     try {
       const devices = await commands.getDevices();
-      set((state) => {
-        // 合并已发现的设备，按 device_id 去重
-        const existingIds = new Set(state.devices.map((d) => d.device_id));
-        const newDevices = (devices as Array<{ device_id: string; [key: string]: unknown }>).filter(
-          (d) => d.device_id && !existingIds.has(d.device_id)
-        );
-        if (newDevices.length === 0) return state;
-        return { devices: [...state.devices, ...newDevices as unknown as DiscoveredDevice[]] };
-      });
+      // 直接替换设备列表（后端已过滤为 TCP 已连接设备）
+      set({ devices: devices as unknown as DiscoveredDevice[] });
     } catch (e) {
       console.error('加载设备列表失败:', e);
     }
