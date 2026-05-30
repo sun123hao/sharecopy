@@ -44,6 +44,8 @@ pub struct DiscoveryService {
     my_ip: Option<std::net::IpAddr>,
     /// 防止重复创建浏览器线程（改名时 re-register 会再次调用 start）
     browser_started: bool,
+    /// 上次重新宣告时间（限制频率，避免其他设备看到反复上下线）
+    last_reannounce: Option<std::time::Instant>,
 }
 
 impl DiscoveryService {
@@ -83,6 +85,7 @@ impl DiscoveryService {
             tcp_port,
             my_ip,
             browser_started: false,
+            last_reannounce: None,
         })
     }
 
@@ -188,7 +191,16 @@ impl DiscoveryService {
     }
 
     /// 重新宣告 mDNS 服务（先注销再注册，强制刷新 SRV/TXT 公告）
+    /// 限频：至少间隔 60 秒，避免其他设备看到反复上下线
     pub fn reannounce(&mut self) -> AppResult<()> {
+        let now = std::time::Instant::now();
+        if let Some(last) = self.last_reannounce {
+            if now - last < std::time::Duration::from_secs(60) {
+                return Ok(()); // 未到间隔，跳过
+            }
+        }
+        self.last_reannounce = Some(now);
+
         // 先注销旧服务（强制其他设备清除缓存）
         let fullname = format!("{}.{}", self.service_name, SERVICE_TYPE);
         if let Err(e) = self.mdns.unregister(&fullname) {
