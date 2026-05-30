@@ -143,12 +143,9 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   startupRefresh: async () => {
     await get().loadDevices();
-    // 密集刷新：前 5 秒每 1.5s 一次，之后逐渐拉长
-    for (const delay of [0, 1500, 3000, 5000, 8000, 12000, 20000]) {
-      setTimeout(async () => {
-        try { await commands.refreshDiscovery(); } catch (_) {}
-        await get().loadDevices();
-      }, delay);
+    // Rust 端启动爆发负责密集 mDNS 查询，JS 端只轮询设备列表
+    for (const delay of [1500, 3000, 5000, 8000, 12000, 20000]) {
+      setTimeout(() => get().loadDevices(), delay);
     }
   },
 }));
