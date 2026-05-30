@@ -42,7 +42,12 @@ pub struct AppState {
 
 #[tauri::command]
 async fn get_devices(state: tauri::State<'_, AppState>) -> Result<Vec<discovery::DiscoveredDevice>, String> {
-    Ok(state.sync_engine.get_discovered_devices())
+    // 只返回当前 TCP 已连接的设备，避免 mDNS 缓存导致显示已退出设备
+    let all = state.sync_engine.get_discovered_devices();
+    Ok(all
+        .into_iter()
+        .filter(|d| state.network.is_connected(&d.device_id))
+        .collect())
 }
 
 #[tauri::command]
