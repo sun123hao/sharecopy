@@ -97,6 +97,8 @@ pub struct SyncEngine {
     pending_clipboard: Arc<parking_lot::Mutex<Option<(ClipboardContent, String, std::time::Instant)>>>,
     /// 重连退避追踪：记录每个设备的上次重连时间
     reconnect_backoff: Arc<dashmap::DashMap<String, (Instant, u32)>>, // (上次重连时间, 当前退避级别)
+    /// TCP 连接过的设备信息缓存（mDNS 不可达时用于 UI 显示）
+    connected_info: Arc<dashmap::DashMap<String, crate::discovery::DiscoveredDevice>>,
     app_handle: AppHandle,
 }
 
@@ -121,6 +123,7 @@ impl SyncEngine {
             image_assemblers: Arc::new(parking_lot::Mutex::new(Vec::new())),
             pending_clipboard: Arc::new(parking_lot::Mutex::new(None)),
             reconnect_backoff: Arc::new(dashmap::DashMap::new()),
+            connected_info: Arc::new(dashmap::DashMap::new()),
             app_handle,
         }
     }
@@ -369,6 +372,17 @@ impl SyncEngine {
             },
             NetworkEvent::DeviceConnected { device_name, device_id, platform } => {
                 tracing::info!("设备已连接: {} ({})", device_name, device_id);
+                // 缓存设备信息（mDNS 不可达时 UI 也能显示）
+                self.connected_info.insert(device_id.clone(), crate::discovery::DiscoveredDevice {
+                    device_id: device_id.clone(),
+                    device_name: device_name.clone(),
+                    hostname: String::new(),
+                    platform: platform.clone(),
+                    ip_address: String::new(),
+                    tcp_port: 0,
+                    last_seen: chrono::Utc::now(),
+                    first_seen: chrono::Utc::now(),
+                });
                 if let Err(e) = self.app_handle.emit("device-online", &serde_json::json!({
                     "device_id": device_id,
                     "device_name": device_name,
@@ -780,6 +794,11 @@ impl SyncEngine {
 
     pub fn get_discovered_devices(&self) -> Vec<crate::discovery::DiscoveredDevice> {
         self.discovery.lock().map(|d| d.list_devices()).unwrap_or_default()
+    }
+
+    /// 获取 TCP 已连接设备的缓存信息（mDNS 不可达时用）
+    pub fn get_connected_device_info(&self, device_id: &str) -> Option<crate::discovery::DiscoveredDevice> {
+        self.connected_info.get(device_id).map(|d| d.clone())
     }
 
     pub fn write_to_clipboard(&self, content: &ClipboardContent) -> crate::error::AppResult<()> {
