@@ -1,4 +1,4 @@
-import { useEffect, useRef, useCallback } from 'react';
+import { useEffect, useRef } from 'react';
 import { Monitor, SendHorizonal, RefreshCw } from 'lucide-react';
 import { useAppStore } from '../store/useAppStore';
 import { useDeviceOnline, useDeviceOffline } from '../hooks/useTauriEvents';
@@ -30,20 +30,17 @@ export function DeviceList() {
   const addDevice = useAppStore((s) => s.addDevice);
   const removeDevice = useAppStore((s) => s.removeDevice);
   const loadConfig = useAppStore((s) => s.loadConfig);
+  const startupRefresh = useAppStore((s) => s.startupRefresh);
   const loadDevices = useAppStore((s) => s.loadDevices);
   const loaded = useRef(false);
 
-  const doLoadDevices = useCallback(async () => {
-    await loadDevices();
-  }, [loadDevices]);
-
-  // 初始加载（仅一次）
+  // 初始加载（仅一次，含延迟刷新捕获慢设备）
   useEffect(() => {
     if (loaded.current) return;
     loaded.current = true;
     loadConfig();
-    doLoadDevices();
-  }, [loadConfig, doLoadDevices]);
+    startupRefresh();
+  }, [loadConfig]);
 
   useDeviceOnline((device) => {
     addDevice(device as DiscoveredDevice);
@@ -76,7 +73,7 @@ export function DeviceList() {
           {devices.length}
         </span>
         <button
-          onClick={() => { loaded.current = false; doLoadDevices(); }}
+          onClick={() => { loadDevices(); }}
           className="ml-auto p-1 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
           title="刷新设备列表"
         >

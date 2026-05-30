@@ -42,13 +42,14 @@ pub struct AppState {
 
 #[tauri::command]
 async fn get_devices(state: tauri::State<'_, AppState>) -> Result<Vec<discovery::DiscoveredDevice>, String> {
-    let cutoff = chrono::Utc::now() - chrono::Duration::seconds(600);
+    // 已连接设备始终显示；未连接设备 90s 内 mDNS 发现才显示（避免退出残留）
+    let cutoff = chrono::Utc::now() - chrono::Duration::seconds(90);
     let mut devices = state.sync_engine.get_discovered_devices()
         .into_iter()
         .filter(|d| d.last_seen >= cutoff || state.network.is_connected(&d.device_id))
         .collect::<Vec<_>>();
 
-    // 补充：TCP 已连接但 mDNS 不可达的设备（如跨子网/AP隔离的 Windows）
+    // 补充：TCP 已连接但 mDNS 不可达的设备
     let existing_ids: std::collections::HashSet<String> = devices.iter().map(|d| d.device_id.clone()).collect();
     for id in state.network.connected_device_ids() {
         if !existing_ids.contains(&id) {

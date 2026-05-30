@@ -17,6 +17,7 @@ interface AppState {
   // Actions
   loadConfig: () => Promise<void>;
   loadDevices: () => Promise<void>;
+  startupRefresh: () => Promise<void>;
   setSyncEnabled: (enabled: boolean) => Promise<void>;
   updateDeviceName: (name: string) => Promise<void>;
   updateConfig: (config: AppConfig) => Promise<void>;
@@ -138,5 +139,12 @@ export const useAppStore = create<AppState>((set, get) => ({
     } catch (e) {
       console.error('获取同步统计失败:', e);
     }
+  },
+
+  startupRefresh: async () => {
+    await get().loadDevices();
+    // 3s 后再次刷新，捕获慢响应的 mDNS 设备（如 Windows）
+    setTimeout(() => get().loadDevices(), 3000);
+    setTimeout(() => get().loadDevices(), 8000);
   },
 }));

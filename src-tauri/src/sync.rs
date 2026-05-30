@@ -395,6 +395,8 @@ impl SyncEngine {
             }
             NetworkEvent::DeviceDisconnected { device_id } => {
                 tracing::info!("设备已断开: {}", device_id);
+                // 清除缓存（防止 mDNS 残留导致 UI 复活已退出设备）
+                self.connected_info.remove(&device_id);
                 if let Err(e) = self.app_handle.emit("device-offline", &device_id) {
                     tracing::error!("发送 device-offline 事件失败: {}", e);
                 }
