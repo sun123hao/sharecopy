@@ -11,8 +11,8 @@ use crate::error::{AppError, AppResult};
 use crate::protocol::{FrameDecoder, HeartbeatPayload, Message};
 
 // ── 心跳常量 ──────────────────────────────
-pub const HEARTBEAT_INTERVAL_SECS: u64 = 8;
-pub const HEARTBEAT_TIMEOUT_SECS: u64 = 20;
+pub const HEARTBEAT_INTERVAL_SECS: u64 = 10;
+pub const HEARTBEAT_TIMEOUT_SECS: u64 = 30;
 /// TCP 写入超时：如果 5 秒内无法完成写入，认为连接已断开
 pub const WRITE_TIMEOUT_SECS: u64 = 5;
 
