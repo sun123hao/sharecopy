@@ -3,9 +3,9 @@ use tauri::{Emitter, Manager};
 use tauri::RunEvent;
 use tokio::sync::mpsc;
 
-mod error;
-mod protocol;
-mod clipboard;
+pub mod error;
+pub mod protocol;
+pub mod clipboard;
 #[cfg(target_os = "macos")]
 mod clipboard_macos;
 #[cfg(target_os = "windows")]
@@ -16,11 +16,11 @@ mod clipboard_android;
 mod android_network;
 #[cfg(target_os = "android")]
 mod android_file;
-mod discovery;
-mod network;
-mod sync;
-mod transfer;
-mod config;
+pub mod discovery;
+pub mod network;
+pub mod sync;
+pub mod transfer;
+pub mod config;
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 mod tray;
 
