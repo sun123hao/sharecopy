@@ -338,3 +338,89 @@ async fn test_large_message_transfer() {
     }
     assert_eq!(count, 10, "应收到 10 条消息");
 }
+
+// ── 测试 6: 一端发送 → 另外两端都收到 ──────
+
+#[tokio::test]
+async fn test_one_sends_two_receive() {
+    // 全互联拓扑：A(55443), B(55444), C(55445) 两两相连
+    let mut a = DeviceHarness::new("mesh-a", 55443);
+    a.network.start().await.unwrap();
+    let mut b = DeviceHarness::new("mesh-b", 55444);
+    b.network.start().await.unwrap();
+    let mut c = DeviceHarness::new("mesh-c", 55445);
+    c.network.start().await.unwrap();
+
+    // A 连接 B 和 C
+    for (id, port) in [("mesh-b", 55444u16), ("mesh-c", 55445u16)] {
+        let d = app_lib::discovery::DiscoveredDevice {
+            device_id: id.into(), device_name: id.into(),
+            hostname: "localhost".into(), platform: "test".into(),
+            ip_address: "127.0.0.1".into(), tcp_port: port,
+            last_seen: chrono::Utc::now(), first_seen: chrono::Utc::now(),
+        };
+        a.network.connect_to_device(&d).await.unwrap();
+    }
+    // B 也连接 C（全互联）
+    let dc = app_lib::discovery::DiscoveredDevice {
+        device_id: "mesh-c".into(), device_name: "C".into(),
+        hostname: "localhost".into(), platform: "test".into(),
+        ip_address: "127.0.0.1".into(), tcp_port: 55445,
+        last_seen: chrono::Utc::now(), first_seen: chrono::Utc::now(),
+    };
+    b.network.connect_to_device(&dc).await.unwrap();
+
+    // 等待全互联建立（6 个连接事件）
+    let mut ev_count = 0u32;
+    let deadline = Duration::from_secs(10);
+    let start = tokio::time::Instant::now();
+    while ev_count < 6 && start.elapsed() < deadline {
+        tokio::select! {
+            r = a.event_rx.recv() => if r.is_some() { ev_count += 1 },
+            r = b.event_rx.recv() => if r.is_some() { ev_count += 1 },
+            r = c.event_rx.recv() => if r.is_some() { ev_count += 1 },
+            _ = tokio::time::sleep(Duration::from_millis(100)) => {},
+        }
+    }
+    assert!(ev_count >= 4, "全互联应至少建立 4 条连接");
+
+    // A 复制文本并广播 → B 和 C 都应收到
+    let msg = Message::ClipboardText(app_lib::protocol::ClipboardTextPayload {
+        source_device_id: "mesh-a".into(),
+        content: "全互联同步测试".into(),
+        timestamp: 100,
+    });
+    a.network.broadcast(&msg).unwrap();
+
+    // B 和 C 都应收到了消息
+    let mut b_got = false;
+    let mut c_got = false;
+    let deadline = Duration::from_secs(5);
+    let start = tokio::time::Instant::now();
+    while (!b_got || !c_got) && start.elapsed() < deadline {
+        tokio::select! {
+            r = b.event_rx.recv() => {
+                if let Some(NetworkEvent::MessageReceived { message, .. }) = r {
+                    if let Message::ClipboardText(p) = message {
+                        if p.content == "全互联同步测试" { b_got = true; }
+                    }
+                }
+            },
+            r = c.event_rx.recv() => {
+                if let Some(NetworkEvent::MessageReceived { message, .. }) = r {
+                    if let Message::ClipboardText(p) = message {
+                        if p.content == "全互联同步测试" { c_got = true; }
+                    }
+                }
+            },
+            _ = tokio::time::sleep(Duration::from_millis(100)) => {},
+        }
+    }
+    assert!(b_got, "B 应从 A 收到消息");
+    assert!(c_got, "C 应从 A 收到消息");
+
+    // 验证全互联连接数
+    assert_eq!(a.network.connected_count(), 2, "A 连接 B 和 C");
+    assert_eq!(b.network.connected_count(), 2, "B 连接 A 和 C");
+    assert_eq!(c.network.connected_count(), 2, "C 连接 A 和 B");
+}
