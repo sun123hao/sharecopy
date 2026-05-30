@@ -185,31 +185,13 @@ pub fn run() {
 
     builder
         .setup(|app| {
-            // 初始化日志
-            #[cfg(not(target_os = "android"))]
-            tracing_subscriber::fmt()
+            // 初始化日志（try_init 避免 Tauri 已注册 subscriber 时 panic）
+            let _ = tracing_subscriber::fmt()
                 .with_env_filter(
                     tracing_subscriber::EnvFilter::try_from_default_env()
                         .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
                 )
-                .init();
-
-            #[cfg(target_os = "android")]
-            {
-                // Android: Tauri 已设置全局 tracing subscriber，不能再 init
-                // tracing 的 log feature 会将事件转发到 log crate（当 subscriber 不处理时）
-                // 写入日志文件作为备份
-                let _ = std::fs::OpenOptions::new()
-                    .create(true)
-                    .append(true)
-                    .open("/data/local/tmp/sharecopy.log")
-                    .map(|f| {
-                        let _ = std::io::Write::write_all(
-                            &mut std::io::BufWriter::new(&f),
-                            b"=== ShareCopy Android ===\n",
-                        );
-                    });
-            }
+                .try_init();
 
             tracing::info!("ShareCopy 启动中...");
 

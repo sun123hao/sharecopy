@@ -205,11 +205,17 @@ impl NetworkManager {
                             tracing::warn!("检测到自我连接，忽略");
                             return Ok(());
                         }
+                        // 原子插入：若已有连接则保留原有连接，忽略新请求
                         let (send_tx, mut send_rx) =
                             tokio::sync::mpsc::unbounded_channel::<Vec<u8>>();
-
-                        // 原子插入：若已存在则忽略此连接（防止双向发现导致重复）
-                        if connections.insert(remote_device_id.clone(), send_tx).is_some() {
+                        let old =
+                            connections.insert(remote_device_id.clone(), send_tx);
+                        if old.is_some() {
+                            // 已有活跃连接，恢复旧 sender（新 sender 被 drop）
+                            // 注意：insert 返回旧值，这里把旧值放回去
+                            if let Some(prev) = old {
+                                connections.insert(remote_device_id.clone(), prev);
+                            }
                             tracing::debug!(
                                 "设备 {} 已连接，忽略重复连接请求",
                                 remote_device_name
