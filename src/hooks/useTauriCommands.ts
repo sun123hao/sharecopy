@@ -55,3 +55,8 @@ export async function copyFromHistory(entryId: string): Promise<void> {
 export async function getAndroidSaveDirs(): Promise<string[]> {
   return invoke('get_android_save_dirs');
 }
+
+// ── 刷新 mDNS 发现 ─────────────────────
+export async function refreshDiscovery(): Promise<void> {
+  return invoke('refresh_discovery');
+}

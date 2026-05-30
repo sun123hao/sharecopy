@@ -143,8 +143,9 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   startupRefresh: async () => {
     await get().loadDevices();
-    // 冷启动时 mDNS 发现慢，多轮刷新捕获 Windows 等慢响应设备
-    for (const delay of [3000, 8000, 20000, 40000]) {
+    // 主动刷新 mDNS，加速发现后启动的设备（如 Windows）
+    try { await commands.refreshDiscovery(); } catch (_) {}
+    for (const delay of [3000, 8000, 20000]) {
       setTimeout(() => get().loadDevices(), delay);
     }
   },

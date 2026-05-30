@@ -803,6 +803,20 @@ impl SyncEngine {
         self.connected_info.get(device_id).map(|d| d.clone())
     }
 
+    /// 主动刷新 mDNS 发现（发送新查询，加速发现后启动的设备）
+    pub fn refresh_discovery(&self) {
+        if let Ok(mut discovery) = self.discovery.lock() {
+            if let Err(e) = discovery.stop() {
+                tracing::warn!("停止旧 mDNS 失败: {}", e);
+            }
+            if let Err(e) = discovery.start() {
+                tracing::warn!("重新启动 mDNS 发现失败: {}", e);
+            } else {
+                tracing::info!("mDNS 发现已刷新");
+            }
+        }
+    }
+
     pub fn write_to_clipboard(&self, content: &ClipboardContent) -> crate::error::AppResult<()> {
         self.watcher.write_safely(content)
     }

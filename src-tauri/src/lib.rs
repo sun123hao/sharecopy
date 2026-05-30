@@ -131,6 +131,13 @@ async fn send_files(
     Ok(())
 }
 
+/// 主动刷新 mDNS 发现（重新 browse，发送新查询）
+#[tauri::command]
+async fn refresh_discovery(state: tauri::State<'_, AppState>) -> Result<(), String> {
+    state.sync_engine.refresh_discovery();
+    Ok(())
+}
+
 /// 获取可用的保存目录路径（Android 返回真实目录，桌面端返回空）
 #[tauri::command]
 async fn get_android_save_dirs() -> Result<Vec<String>, String> {
@@ -457,6 +464,7 @@ pub fn run() {
             copy_from_history,
             is_sync_enabled,
             get_android_save_dirs,
+            refresh_discovery,
         ])
         .build(tauri::generate_context!())
         .expect("ShareCopy 启动失败")
