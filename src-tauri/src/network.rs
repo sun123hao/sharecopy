@@ -376,12 +376,14 @@ impl NetworkManager {
             tracing::debug!("跳过自身连接: device_id={}", device.device_id);
             return Ok(());
         }
-        // 原子占位：插入空 sender 防止竞态，connect 失败时移除
-        let (placeholder_tx, _) = tokio::sync::mpsc::unbounded_channel::<Vec<u8>>();
-        if self.connections.insert(device.device_id.clone(), placeholder_tx).is_some() {
+        // 已连接则跳过（先检查，避免 placeholder 替换有效 sender）
+        if self.connections.contains_key(&device.device_id) {
             tracing::debug!("设备 {} 已被连接，跳过", device.device_name);
             return Ok(());
         }
+        // 原子占位：插入空 sender 防止竞态，connect 失败时移除
+        let (placeholder_tx, _) = tokio::sync::mpsc::unbounded_channel::<Vec<u8>>();
+        self.connections.insert(device.device_id.clone(), placeholder_tx);
 
         let addr = format!("{}:{}", device.ip_address, device.tcp_port);
         tracing::info!("正在连接设备: {} ({})...", device.device_name, addr);
