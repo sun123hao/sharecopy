@@ -680,3 +680,103 @@ async fn test_no_connection_error_before_connect() {
         other => panic!("应返回 NoConnection，实际: {:?}", other),
     }
 }
+
+// ── E2E 场景: 模拟三设备真实剪贴板同步会话 ──
+
+#[tokio::test]
+async fn test_e2e_clipboard_session_three_devices() {
+    // ── Setup: 三设备全互联 ──
+    let (mut a, mut b, mut c) = (
+        DeviceHarness::new("user-a", 55457),
+        DeviceHarness::new("user-b", 55458),
+        DeviceHarness::new("user-c", 55459),
+    );
+    for d in [&mut a, &mut b, &mut c] { d.network.start().await.unwrap(); }
+
+    // A→B, A→C, B→C（全互联）
+    let make_device = |id: &str, port: u16| app_lib::discovery::DiscoveredDevice {
+        device_id: id.into(), device_name: id.into(),
+        hostname: "localhost".into(), platform: "test".into(),
+        ip_address: "127.0.0.1".into(), tcp_port: port,
+        last_seen: chrono::Utc::now(), first_seen: chrono::Utc::now(),
+    };
+    a.network.connect_to_device(&make_device("user-b", 55458)).await.unwrap();
+    a.network.connect_to_device(&make_device("user-c", 55459)).await.unwrap();
+    b.network.connect_to_device(&make_device("user-c", 55459)).await.unwrap();
+
+    // 等待连接建立
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    // 清空积累的连接事件
+    while a.event_rx.try_recv().is_ok() {}
+    while b.event_rx.try_recv().is_ok() {}
+    while c.event_rx.try_recv().is_ok() {}
+
+    // ── 场景 1: A 复制文字 → B 和 C 都应收到 ──
+    let msg1 = Message::ClipboardText(app_lib::protocol::ClipboardTextPayload {
+        source_device_id: "user-a".into(),
+        content: "📋 第一次复制".into(),
+        timestamp: 1,
+    });
+    a.network.broadcast(&msg1).unwrap();
+
+    let mut b_rcv = false; let mut c_rcv = false;
+    let dl = Duration::from_secs(3); let start = tokio::time::Instant::now();
+    while (!b_rcv || !c_rcv) && start.elapsed() < dl {
+        tokio::select! {
+            r = b.event_rx.recv() => { if let Some(NetworkEvent::MessageReceived { message, .. }) = r { if let Message::ClipboardText(p) = message { b_rcv = p.content == "📋 第一次复制"; } } },
+            r = c.event_rx.recv() => { if let Some(NetworkEvent::MessageReceived { message, .. }) = r { if let Message::ClipboardText(p) = message { c_rcv = p.content == "📋 第一次复制"; } } },
+            _ = tokio::time::sleep(Duration::from_millis(50)) => {},
+        }
+    }
+    assert!(b_rcv, "场景1: B 应收到 A 的复制");
+    assert!(c_rcv, "场景1: C 应收到 A 的复制");
+
+    // ── 场景 2: B 连续复制 3 次 → A 和 C 都应收到 ──
+    for i in 0..3 {
+        let msg = Message::ClipboardText(app_lib::protocol::ClipboardTextPayload {
+            source_device_id: "user-b".into(),
+            content: format!("B 复制 #{}", i),
+            timestamp: 10 + i,
+        });
+        b.network.broadcast(&msg).unwrap();
+    }
+
+    let mut a_count = 0u32; let mut c_count = 0u32;
+    let dl = Duration::from_secs(5); let start = tokio::time::Instant::now();
+    while (a_count < 3 || c_count < 3) && start.elapsed() < dl {
+        tokio::select! {
+            r = a.event_rx.recv() => { if r.is_some() { a_count += 1; } },
+            r = c.event_rx.recv() => { if r.is_some() { c_count += 1; } },
+            _ = tokio::time::sleep(Duration::from_millis(50)) => {},
+        }
+    }
+    assert!(a_count >= 3, "场景2: A 应收到 B 的 3 次复制 (收到 {})", a_count);
+    assert!(c_count >= 3, "场景2: C 应收到 B 的 3 次复制 (收到 {})", c_count);
+
+    // ── 场景 3: C 断开，A 和 B 继续同步 ──
+    c.network.shutdown();
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    let msg3 = Message::ClipboardText(app_lib::protocol::ClipboardTextPayload {
+        source_device_id: "user-a".into(),
+        content: "C 已断开".into(),
+        timestamp: 20,
+    });
+    a.network.broadcast(&msg3).unwrap();
+
+    let mut b_rcv3 = false;
+    let dl = Duration::from_secs(3); let start = tokio::time::Instant::now();
+    while !b_rcv3 && start.elapsed() < dl {
+        tokio::select! {
+            r = b.event_rx.recv() => { if let Some(NetworkEvent::MessageReceived { message, .. }) = r { if let Message::ClipboardText(p) = message { b_rcv3 = p.content == "C 已断开"; } } },
+            _ = tokio::time::sleep(Duration::from_millis(50)) => {},
+        }
+    }
+    assert!(b_rcv3, "场景3: C 断开后 A→B 仍可同步");
+
+    // ── 场景 4: A↔B 仍可通信（C 断开不影响） ──
+    assert!(a.network.is_connected("user-b") || a.network.connected_count() >= 1,
+        "A 应与 B 保持连接");
+    assert!(b.network.is_connected("user-a") || b.network.connected_count() >= 1,
+        "B 应与 A 保持连接");
+}
