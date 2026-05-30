@@ -205,31 +205,55 @@ impl NetworkManager {
                             tracing::warn!("检测到自我连接，忽略");
                             return Ok(());
                         }
-                        // 已有连接 → 优雅关闭重复连接（不发 RST）
+                        // 已有连接 → 检查是否为占位符（双方同时发起连接）
                         if connections.contains_key(&remote_device_id) {
-                            tracing::debug!(
-                                "设备 {} 已连接，优雅关闭重复连接",
-                                remote_device_name
-                            );
-                            // 步骤1: shutdown(Write) → 发送 FIN，告诉对方"我不会再写数据"
-                            // 步骤2: 短暂 drain（1s）→ 排空对方可能还在发送的残留数据
-                            // 步骤3: drop stream → 连接干净关闭，不触发 RST
-                            use tokio::io::AsyncWriteExt;
-                            let _ = stream.shutdown().await;
-                            let mut drain_buf = vec![0u8; 4096];
-                            let _ = tokio::time::timeout(
-                                std::time::Duration::from_secs(1),
-                                async {
-                                    loop {
-                                        match stream.read(&mut drain_buf).await {
-                                            Ok(0) | Err(_) => break,
-                                            Ok(_) => {}
+                            let is_placeholder = connections
+                                .get(&remote_device_id)
+                                .map(|s| s.is_closed())
+                                .unwrap_or(false);
+
+                            if is_placeholder {
+                                // 双方同时发起连接：小端 device_id 接受传入连接
+                                // connect_to_device 中的检测会放弃主动连接
+                                if _my_device_id < remote_device_id {
+                                    tracing::info!(
+                                        "双方同时连接 {}，我方胜出，接受传入连接",
+                                        remote_device_name
+                                    );
+                                    connections.remove(&remote_device_id);
+                                    // 不 return，继续使用此传入连接
+                                } else {
+                                    tracing::debug!(
+                                        "双方同时连接 {}，对方胜出，保持主动连接",
+                                        remote_device_name
+                                    );
+                                    use tokio::io::AsyncWriteExt;
+                                    let _ = stream.shutdown().await;
+                                    return Ok(());
+                                }
+                            } else {
+                                // 真正的重复连接（已有活跃连接）→ 优雅关闭
+                                tracing::debug!(
+                                    "设备 {} 已连接，优雅关闭重复连接",
+                                    remote_device_name
+                                );
+                                use tokio::io::AsyncWriteExt;
+                                let _ = stream.shutdown().await;
+                                let mut drain_buf = vec![0u8; 4096];
+                                let _ = tokio::time::timeout(
+                                    std::time::Duration::from_secs(1),
+                                    async {
+                                        loop {
+                                            match stream.read(&mut drain_buf).await {
+                                                Ok(0) | Err(_) => break,
+                                                Ok(_) => {}
+                                            }
                                         }
-                                    }
-                                },
-                            )
-                            .await;
-                            return Ok(());
+                                    },
+                                )
+                                .await;
+                                return Ok(());
+                            }
                         }
 
                         let (send_tx, mut send_rx) =
@@ -424,6 +448,18 @@ impl NetworkManager {
             self.connections.remove(&device.device_id);
             self.notified.remove(&device.device_id);
             return Err(AppError::Network(e));
+        }
+
+        // 检查占位符是否被传入连接替代（双方同时连接时，小端 ID 会接受传入连接）
+        if let Some(sender) = self.connections.get(&device.device_id) {
+            if !sender.is_closed() {
+                // 占位符已被替换为真实 sender → 传入连接已接管
+                tracing::info!(
+                    "主动连接 {} 已被传入连接接管，放弃",
+                    device.device_name
+                );
+                return Ok(());
+            }
         }
 
         let (send_tx, mut send_rx) = tokio::sync::mpsc::unbounded_channel::<Vec<u8>>();
