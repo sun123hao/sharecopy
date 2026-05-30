@@ -6,13 +6,9 @@
 use jni::objects::{GlobalRef, JObject, JValue};
 use jni::JavaVM;
 use sha2::{Digest, Sha256};
-use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::clipboard::{ClipboardBackend, ClipboardContent};
 use crate::error::AppResult;
-
-/// 剪贴板变更计数器（JNI 回调递增，change_count() 返回）
-static CLIP_CHANGE_COUNT: AtomicU64 = AtomicU64::new(0);
 
 pub struct AndroidClipboardBackend {
     jvm: JavaVM,
@@ -216,13 +212,7 @@ impl ClipboardBackend for AndroidClipboardBackend {
     }
 
     fn change_count(&self) -> AppResult<u64> {
-        // 监听器计数器优先（由 OnPrimaryClipChangedListener 递增）
-        let count = CLIP_CHANGE_COUNT.load(Ordering::Relaxed);
-        if count > 0 {
-            return Ok(count);
-        }
-
-        // 回退轮询：读剪贴板算 hash
+        // 读剪贴板：可访问时计算 hash，不可访问时用 5s 时间桶重试
         match self.read() {
             Ok(ClipboardContent::None) => {
                 // 剪贴板为空或后台不可访问 → 用 5 秒时间桶确保定期重试

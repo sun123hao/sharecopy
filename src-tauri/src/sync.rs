@@ -278,7 +278,7 @@ impl SyncEngine {
         let total_chunks = (data.len() + IMAGE_CHUNK_SIZE - 1) / IMAGE_CHUNK_SIZE;
         let total_chunks = total_chunks.min(u16::MAX as usize) as u16;
 
-        let mut any_success = false;
+        let mut all_success = true;
         for i in 0..total_chunks {
             let start = i as usize * IMAGE_CHUNK_SIZE;
             let end = std::cmp::min(start + IMAGE_CHUNK_SIZE, data.len());
@@ -296,19 +296,22 @@ impl SyncEngine {
             });
 
             match self.network.broadcast(&msg) {
-                Ok(()) => any_success = true,
+                Ok(()) => {} // 成功，继续
                 Err(AppError::NoConnection) => {
                     tracing::debug!("大图片分块广播时无连接，中断发送");
+                    all_success = false;
                     break;
                 }
                 Err(e) => {
                     tracing::error!("广播图片块 {}/{} 失败: {}", i, total_chunks, e);
+                    all_success = false;
+                    break;
                 }
             }
         }
 
-        // 至少一个 chunk 发送成功才递增统计
-        if any_success {
+        // 所有 chunk 都成功才递增统计
+        if all_success {
             self.stats.lock().images_synced += 1;
         }
     }
@@ -490,6 +493,8 @@ impl SyncEngine {
                 return;
             }
             tracing::info!("设备已连接，广播缓存的剪贴板内容");
+            // 克隆一份用于 NoConnection 时重新缓存
+            let content_clone = content.clone();
             let msg = match content {
                 ClipboardContent::Text(text) => Message::ClipboardText(ClipboardTextPayload {
                     source_device_id: self.device_id.clone(),
@@ -548,8 +553,18 @@ impl SyncEngine {
                 }
                 ClipboardContent::None => return,
             };
-            if let Err(e) = self.network.broadcast(&msg) {
-                tracing::error!("广播缓存的剪贴板内容失败: {}", e);
+            match self.network.broadcast(&msg) {
+                Ok(()) => {}
+                Err(AppError::NoConnection) => {
+                    // 连接已断，用克隆副本重新缓存
+                    let hash = content_clone.content_hash();
+                    *self.pending_clipboard.lock() =
+                        Some((content_clone, hash, std::time::Instant::now()));
+                    tracing::debug!("flush 时无连接，重新缓存");
+                }
+                Err(e) => {
+                    tracing::error!("广播缓存的剪贴板内容失败: {}", e);
+                }
             }
         }
     }
@@ -558,6 +573,10 @@ impl SyncEngine {
 
     /// 尝试重连已发现的设备（带指数退避）
     fn try_reconnect_device(&self, device_id: &str) {
+        // 遵循双向连接规则：只有 device_id 大的一端主动连接
+        if device_id <= self.device_id.as_str() {
+            return;
+        }
         // 检查是否仍在 mDNS 发现列表中
         let device = {
             if let Ok(discovery) = self.discovery.lock() {
@@ -625,31 +644,39 @@ impl SyncEngine {
 
     /// 定期重连检查 + 清理过期数据
     fn periodic_reconnect_and_cleanup(&self) {
-        // 1. 重连：遍历发现列表中的设备，对未连接的尝试重连
-        if let Ok(discovery) = self.discovery.lock() {
-            for device in discovery.list_devices() {
-                // 跳过本机
-                if device.device_id == self.device_id {
-                    continue;
-                }
-                // 跳过已连接的设备
-                if self.network.is_connected(&device.device_id) {
-                    continue;
-                }
-                // 触发重连（内部有退避机制和 staleness 检查）
-                self.try_reconnect_device(&device.device_id);
+        // 1. 重连：在锁内收集需重连的设备 ID，释放锁后再执行
+        let to_reconnect: Vec<String> = {
+            if let Ok(discovery) = self.discovery.lock() {
+                discovery
+                    .list_devices()
+                    .into_iter()
+                    .filter(|d| d.device_id != self.device_id && !self.network.is_connected(&d.device_id))
+                    .map(|d| d.device_id)
+                    .collect()
+            } else {
+                Vec::new()
             }
+        };
+        for device_id in to_reconnect {
+            self.try_reconnect_device(&device_id);
         }
 
-        // 2. 清理过期 mDNS 设备（超过 300s 未更新）
-        if let Ok(discovery) = self.discovery.lock() {
-            let removed = discovery.clean_stale_devices(300);
-            for device_id in &removed {
-                // 同步清理 connections 中的残留条目
+        // 2. 清理过期 mDNS 设备 + 同步清理 connections 残留
+        // 与重连用同一个锁，避免二次加锁
+        {
+            // 获取需要清理的过期设备列表
+            let stale_ids: Vec<String> = {
+                if let Ok(discovery) = self.discovery.lock() {
+                    discovery.clean_stale_devices(300)
+                } else {
+                    Vec::new()
+                }
+            };
+            for device_id in &stale_ids {
                 self.reconnect_backoff.remove(device_id);
             }
-            if !removed.is_empty() {
-                tracing::info!("清理了 {} 个过期设备", removed.len());
+            if !stale_ids.is_empty() {
+                tracing::info!("清理了 {} 个过期设备", stale_ids.len());
             }
         }
 

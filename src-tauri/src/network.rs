@@ -205,8 +205,10 @@ impl NetworkManager {
                             tracing::warn!("检测到自我连接，忽略");
                             return Ok(());
                         }
-                        // 已有连接时不替换，静默等待此 TCP 流自然关闭
+                        // 已有连接 → 静默等待此 TCP 流自然关闭（不发 RST）
                         if connections.contains_key(&remote_device_id) {
+                            // 注意：这里 contains_key 是纯读操作，不修改 map
+                            // 不涉及 TOCTOU 因为只做 drain 决策，不插入
                             tracing::debug!(
                                 "设备 {} 已连接，忽略重复连接",
                                 remote_device_name
@@ -376,14 +378,17 @@ impl NetworkManager {
             tracing::debug!("跳过自身连接: device_id={}", device.device_id);
             return Ok(());
         }
-        // 已连接则跳过（先检查，避免 placeholder 替换有效 sender）
-        if self.connections.contains_key(&device.device_id) {
-            tracing::debug!("设备 {} 已被连接，跳过", device.device_name);
-            return Ok(());
-        }
-        // 原子占位：插入空 sender 防止竞态，connect 失败时移除
+        // 原子占位：用 entry API 确保原子 check-and-insert
         let (placeholder_tx, _) = tokio::sync::mpsc::unbounded_channel::<Vec<u8>>();
-        self.connections.insert(device.device_id.clone(), placeholder_tx);
+        match self.connections.entry(device.device_id.clone()) {
+            dashmap::mapref::entry::Entry::Occupied(_) => {
+                tracing::debug!("设备 {} 已被连接，跳过", device.device_name);
+                return Ok(());
+            }
+            dashmap::mapref::entry::Entry::Vacant(vacant) => {
+                vacant.insert(placeholder_tx);
+            }
+        }
 
         let addr = format!("{}:{}", device.ip_address, device.tcp_port);
         tracing::info!("正在连接设备: {} ({})...", device.device_name, addr);
