@@ -573,9 +573,24 @@ impl SyncEngine {
 
     /// 尝试重连已发现的设备（带指数退避）
     fn try_reconnect_device(&self, device_id: &str) {
-        // 遵循双向连接规则：只有 device_id 大的一端主动连接
+        // 双向连接规则：device_id 大的一端主动连接
+        // 但如果等待超过 30s 仍未连接，小端也尝试（回退）
         if device_id <= self.device_id.as_str() {
-            return;
+            // 小端：检查是否等待超时（设备发现超过 30s 仍未连接 → 主动尝试）
+            let should_fallback = {
+                if let Ok(discovery) = self.discovery.lock() {
+                    discovery.list_devices().into_iter().any(|d| {
+                        d.device_id == device_id
+                            && (chrono::Utc::now() - d.last_seen).num_seconds() > 30
+                    })
+                } else {
+                    false
+                }
+            };
+            if !should_fallback {
+                return;
+            }
+            tracing::info!("设备 {} 等待超时，小端主动回退连接", device_id);
         }
         // 检查是否仍在 mDNS 发现列表中
         let device = {
