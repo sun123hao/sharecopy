@@ -458,21 +458,14 @@ impl SyncEngine {
     async fn handle_discovery_event(&self, event: DiscoveryEvent) {
         match event {
             DiscoveryEvent::DeviceFound(device) => {
-                // 双向对称发现时，只有 device_id 较大的一端主动发起 TCP 连接
-                // 避免双向连接互相覆盖 sender 导致数据流断裂
-                if device.device_id > self.device_id {
-                    let device_name = device.device_name.clone();
-                    match self.network.connect_to_device(&device).await {
-                        Ok(()) => {}
-                        Err(e) => {
-                            tracing::warn!("连接设备 {} 失败: {}", device_name, e);
-                        }
+                // 主动连接所有发现的设备，形成全互联拓扑
+                // 双向连接现由 entry() API + drain 机制安全处理
+                let device_name = device.device_name.clone();
+                match self.network.connect_to_device(&device).await {
+                    Ok(()) => {}
+                    Err(e) => {
+                        tracing::warn!("连接设备 {} 失败: {}", device_name, e);
                     }
-                } else {
-                    tracing::debug!(
-                        "设备 {} 的 device_id 较小，等待对方主动连接",
-                        device.device_name
-                    );
                 }
             }
             DiscoveryEvent::DeviceLost(_device_id) => {
@@ -582,25 +575,6 @@ impl SyncEngine {
 
     /// 尝试重连已发现的设备（带指数退避）
     fn try_reconnect_device(&self, device_id: &str) {
-        // 双向连接规则：device_id 大的一端主动连接
-        // 但如果等待超过 30s 仍未连接，小端也尝试（回退）
-        if device_id <= self.device_id.as_str() {
-            // 小端：检查首次发现是否超过 30s（用 first_seen，不受 mDNS 刷新影响）
-            let should_fallback = {
-                if let Ok(discovery) = self.discovery.lock() {
-                    discovery.list_devices().into_iter().any(|d| {
-                        d.device_id == device_id
-                            && (chrono::Utc::now() - d.first_seen).num_seconds() > 30
-                    })
-                } else {
-                    false
-                }
-            };
-            if !should_fallback {
-                return;
-            }
-            tracing::info!("设备 {} 等待超时，小端主动回退连接", device_id);
-        }
         // 检查是否仍在 mDNS 发现列表中
         let device = {
             if let Ok(discovery) = self.discovery.lock() {
