@@ -458,8 +458,9 @@ impl SyncEngine {
     async fn handle_discovery_event(&self, event: DiscoveryEvent) {
         match event {
             DiscoveryEvent::DeviceFound(device) => {
+                // mDNS 刷新时清除对应设备的退避计数（设备已在线，应快速重连）
+                self.reconnect_backoff.remove(&device.device_id);
                 // 主动连接所有发现的设备，形成全互联拓扑
-                // 双向连接现由 entry() API + drain 机制安全处理
                 let device_name = device.device_name.clone();
                 match self.network.connect_to_device(&device).await {
                     Ok(()) => {}
