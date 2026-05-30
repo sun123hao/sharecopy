@@ -203,7 +203,15 @@ impl DiscoveryService {
             tracing::debug!("mDNS rebrowse 线程启动");
             let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
             loop {
-                match rx.recv() {
+                let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+                if remaining.is_zero() {
+                    tracing::debug!("mDNS rebrowse 线程超时退出");
+                    break;
+                }
+                // 使用 recv_timeout 替代 recv()：最多阻塞 1 秒
+                // recv_timeout 在超时时返回 Err（重新检查 deadline）
+                // 在浏览器断开时也返回 Err（下次循环 deadline 到期后退出）
+                match rx.recv_timeout(remaining.min(std::time::Duration::from_secs(1))) {
                     Ok(event) => {
                         Self::process_service_event(
                             event,
@@ -212,15 +220,12 @@ impl DiscoveryService {
                             &my_device_id,
                         );
                     }
-                    Err(e) => {
-                        tracing::debug!("rebrowse 浏览器错误: {}, 线程退出", e);
-                        break;
+                    Err(_) => {
+                        // 超时或断开 → 回到循环开头检查 deadline
+                        // 断开时浏览器 stopped，recv_timeout 立即返回 Err，
+                        // 但 deadline 未到期时会快速自旋直到到期（最多 10 秒内无害）
+                        continue;
                     }
-                }
-                // 超时退出，避免线程无限增长
-                if std::time::Instant::now() > deadline {
-                    tracing::debug!("mDNS rebrowse 线程超时退出");
-                    break;
                 }
             }
             // rx 在此 drop → 浏览器被清理

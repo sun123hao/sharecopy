@@ -479,8 +479,6 @@ impl SyncEngine {
     async fn handle_discovery_event(&self, event: DiscoveryEvent) {
         match event {
             DiscoveryEvent::DeviceFound(device) => {
-                // mDNS 刷新时清除退避，准备快速重连
-                self.reconnect_backoff.remove(&device.device_id);
                 let is_android = std::env::consts::OS == "android";
                 let remote_is_android = device.platform == "android";
 
@@ -501,9 +499,13 @@ impl SyncEngine {
                     let network = self.network.clone();
                     let reconnecting = self.reconnect_backoff.clone();
                     let retry_id = dev.device_id.clone();
-                    // 防重复：已在重试中则跳过
+                    // 防重复：检查是否已有重试任务运行
                     let already_retrying = reconnecting.contains_key(&retry_id);
-                    if !already_retrying {
+                    if already_retrying {
+                        // 已有重试任务 → 重置退避为 0，让现有任务更快重试
+                        reconnecting.insert(retry_id.clone(), (Instant::now(), 0));
+                    } else {
+                        // 首次重试：插入退避记录 + spawn 重试任务
                         reconnecting.insert(retry_id.clone(), (Instant::now(), 0));
                         // 后台重试：Windows TCP 可能尚未就绪，快速重试避免等 15s 周期
                         tokio::spawn(async move {
@@ -530,7 +532,7 @@ impl SyncEngine {
                         reconnecting.remove(&retry_id);
                         tracing::warn!("连接 {} 最终失败", device_name);
                         });
-                    } // !already_retrying
+                    }
                 } else {
                     tracing::debug!(
                         "设备 {} 等待对方主动连接（30s 超时后回退）",
