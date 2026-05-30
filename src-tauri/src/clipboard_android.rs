@@ -212,18 +212,12 @@ impl ClipboardBackend for AndroidClipboardBackend {
     }
 
     fn change_count(&self) -> AppResult<u64> {
-        // 读剪贴板：可访问时计算 hash，不可访问时用 5s 时间桶重试
         match self.read() {
             Ok(ClipboardContent::None) => {
-                // 剪贴板为空或后台不可访问 → 用 5 秒时间桶确保定期重试
-                Ok(std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_secs()
-                    / 5)
+                // 剪贴板为空或不可访问 → 返回 0，让 watcher 进入 idle 模式
+                Ok(0)
             }
             Ok(content) => {
-                // 剪贴板可访问 → 计算 hash
                 let hash = content.content_hash();
                 let digest = Sha256::digest(hash.as_bytes());
                 let mut buf = [0u8; 8];
@@ -231,12 +225,8 @@ impl ClipboardBackend for AndroidClipboardBackend {
                 Ok(u64::from_be_bytes(buf))
             }
             Err(_) => {
-                // 读取异常 → 用时间桶
-                Ok(std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_secs()
-                    / 5)
+                // 读取异常 → 返回 0，让 watcher 降速
+                Ok(0)
             }
         }
     }

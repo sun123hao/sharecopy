@@ -486,7 +486,7 @@ impl SyncEngine {
     /// 设备首次连接时，广播缓存的剪贴板内容（超过 60 秒则丢弃）
     fn flush_pending_clipboard(&self) {
         let pending = self.pending_clipboard.lock().take();
-        if let Some((content, _hash, cached_at)) = pending {
+        if let Some((content, hash, cached_at)) = pending {
             // 超过 60 秒的缓存视为过时，丢弃
             if cached_at.elapsed() > std::time::Duration::from_secs(60) {
                 tracing::debug!("剪贴板缓存已过期，丢弃");
@@ -512,7 +512,16 @@ impl SyncEngine {
                             timestamp: chrono::Utc::now().timestamp_millis() as u64,
                         })
                     } else {
-                        // 大图片走分块发送
+                        // 大图片分块发送：先重新缓存（防止广播失败丢失内容）
+                        *self.pending_clipboard.lock() = Some((
+                            ClipboardContent::Image {
+                                width,
+                                height,
+                                data: data.clone(),
+                            },
+                            hash.clone(),
+                            std::time::Instant::now(),
+                        ));
                         tokio::spawn({
                             let engine_network = self.network.clone();
                             let engine_device_id = self.device_id.clone();
@@ -576,12 +585,12 @@ impl SyncEngine {
         // 双向连接规则：device_id 大的一端主动连接
         // 但如果等待超过 30s 仍未连接，小端也尝试（回退）
         if device_id <= self.device_id.as_str() {
-            // 小端：检查是否等待超时（设备发现超过 30s 仍未连接 → 主动尝试）
+            // 小端：检查首次发现是否超过 30s（用 first_seen，不受 mDNS 刷新影响）
             let should_fallback = {
                 if let Ok(discovery) = self.discovery.lock() {
                     discovery.list_devices().into_iter().any(|d| {
                         d.device_id == device_id
-                            && (chrono::Utc::now() - d.last_seen).num_seconds() > 30
+                            && (chrono::Utc::now() - d.first_seen).num_seconds() > 30
                     })
                 } else {
                     false
@@ -755,7 +764,7 @@ impl SyncEngine {
     }
 
     pub fn get_discovered_devices(&self) -> Vec<crate::discovery::DiscoveredDevice> {
-        self.discovery.lock().unwrap().list_devices()
+        self.discovery.lock().map(|d| d.list_devices()).unwrap_or_default()
     }
 
     pub fn write_to_clipboard(&self, content: &ClipboardContent) -> crate::error::AppResult<()> {

@@ -16,6 +16,8 @@ pub struct DiscoveredDevice {
     pub ip_address: String,
     pub tcp_port: u16,
     pub last_seen: chrono::DateTime<chrono::Utc>,
+    /// 首次发现时间（不随 mDNS 刷新更新，用于回退超时判断）
+    pub first_seen: chrono::DateTime<chrono::Utc>,
 }
 
 // ── 发现事件 ──────────────────────────────
@@ -276,10 +278,17 @@ impl DiscoveryService {
                                 .map(|a| a.to_string())
                                 .unwrap_or_default();
 
-                            // 始终更新 last_seen（即使设备信息未变）
-                            if let Some(mut existing) = devices.get_mut(&device_id) {
-                                existing.last_seen = chrono::Utc::now();
-                            }
+                            // 更新 last_seen + 保留 first_seen（用于回退超时判断）
+                            let first_seen = if let Some(existing) = devices.get(&device_id) {
+                                let fs = existing.first_seen;
+                                drop(existing);
+                                if let Some(mut e) = devices.get_mut(&device_id) {
+                                    e.last_seen = chrono::Utc::now();
+                                }
+                                fs // 保留首次发现时间
+                            } else {
+                                chrono::Utc::now() // 新设备
+                            };
 
                             let device = DiscoveredDevice {
                                 device_id: device_id.clone(),
@@ -289,6 +298,7 @@ impl DiscoveryService {
                                 ip_address,
                                 tcp_port: info.get_port(),
                                 last_seen: chrono::Utc::now(),
+                                first_seen,
                             };
 
                             tracing::info!(
