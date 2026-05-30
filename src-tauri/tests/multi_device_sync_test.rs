@@ -424,3 +424,259 @@ async fn test_one_sends_two_receive() {
     assert_eq!(b.network.connected_count(), 2, "B 连接 A 和 C");
     assert_eq!(c.network.connected_count(), 2, "C 连接 A 和 B");
 }
+
+// ── 测试 7: 图片数据编码同步 ─────────────────
+
+#[tokio::test]
+async fn test_image_sync_via_network() {
+    let mut a = DeviceHarness::new("img-a", 55446);
+    a.network.start().await.unwrap();
+    let mut b = DeviceHarness::new("img-b", 55447);
+    b.network.start().await.unwrap();
+
+    let db = app_lib::discovery::DiscoveredDevice {
+        device_id: "img-b".into(), device_name: "B".into(),
+        hostname: "localhost".into(), platform: "test".into(),
+        ip_address: "127.0.0.1".into(), tcp_port: 55447,
+        last_seen: chrono::Utc::now(), first_seen: chrono::Utc::now(),
+    };
+    a.network.connect_to_device(&db).await.unwrap();
+    timeout(Duration::from_secs(3), a.event_rx.recv()).await.ok();
+    timeout(Duration::from_secs(3), b.event_rx.recv()).await.ok();
+
+    // 模拟小图片（< 10MB 阈值）
+    let png_data = vec![0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A]; // PNG header + padding
+    let mut img_bytes = png_data.clone();
+    img_bytes.extend(vec![0u8; 100]); // ~108 bytes total
+    let msg = Message::ClipboardImage(app_lib::protocol::ClipboardImagePayload {
+        source_device_id: "img-a".into(),
+        width: 10,
+        height: 10,
+        format: app_lib::protocol::ImageFormat::Png,
+        data: img_bytes.clone(),
+        timestamp: 1,
+    });
+    a.network.send("img-b", &msg).unwrap();
+
+    let received = timeout(Duration::from_secs(3), b.event_rx.recv()).await;
+    assert!(received.is_ok(), "B 应收到图片消息");
+    if let Ok(Some(NetworkEvent::MessageReceived { message, .. })) = received {
+        match message {
+            Message::ClipboardImage(p) => {
+                assert_eq!(p.width, 10);
+                assert_eq!(p.height, 10);
+                assert_eq!(p.data.len(), img_bytes.len());
+            }
+            _ => panic!("应收到 ClipboardImage"),
+        }
+    }
+}
+
+// ── 测试 8: 图片分块传输 ────────────────────
+
+#[tokio::test]
+async fn test_image_chunk_transfer() {
+    let mut a = DeviceHarness::new("chunk-a", 55448);
+    a.network.start().await.unwrap();
+    let mut b = DeviceHarness::new("chunk-b", 55449);
+    b.network.start().await.unwrap();
+
+    let db = app_lib::discovery::DiscoveredDevice {
+        device_id: "chunk-b".into(), device_name: "B".into(),
+        hostname: "localhost".into(), platform: "test".into(),
+        ip_address: "127.0.0.1".into(), tcp_port: 55449,
+        last_seen: chrono::Utc::now(), first_seen: chrono::Utc::now(),
+    };
+    a.network.connect_to_device(&db).await.unwrap();
+    timeout(Duration::from_secs(3), a.event_rx.recv()).await.ok();
+    timeout(Duration::from_secs(3), b.event_rx.recv()).await.ok();
+
+    // 模拟 5 个分块
+    let transfer_id = "test-transfer-001".to_string();
+    let total_chunks: u16 = 5;
+    for i in 0..total_chunks {
+        let msg = Message::ClipboardImageChunk(app_lib::protocol::ClipboardImageChunkPayload {
+            source_device_id: "chunk-a".into(),
+            transfer_id: transfer_id.clone(),
+            width: 100,
+            height: 100,
+            total_chunks,
+            chunk_index: i,
+            data: vec![i as u8; 1024],
+            timestamp: i as u64,
+        });
+        a.network.send("chunk-b", &msg).unwrap();
+    }
+
+    // B 应收齐 5 个 chunk
+    let mut chunks: Vec<u16> = Vec::new();
+    let deadline = Duration::from_secs(10);
+    let start = tokio::time::Instant::now();
+    while chunks.len() < 5 && start.elapsed() < deadline {
+        match timeout(Duration::from_secs(2), b.event_rx.recv()).await {
+            Ok(Some(NetworkEvent::MessageReceived { message, .. })) => {
+                if let Message::ClipboardImageChunk(p) = message {
+                    assert_eq!(p.transfer_id, transfer_id);
+                    chunks.push(p.chunk_index);
+                }
+            }
+            _ => break,
+        }
+    }
+    assert_eq!(chunks.len(), 5, "应收齐 5 个分块");
+}
+
+// ── 测试 9: 心跳 Ping/Pong 循环 ──────────────
+
+#[tokio::test]
+async fn test_heartbeat_ping_pong() {
+    let mut a = DeviceHarness::new("hb-a", 55450);
+    a.network.start().await.unwrap();
+    let mut b = DeviceHarness::new("hb-b", 55451);
+    b.network.start().await.unwrap();
+
+    let db = app_lib::discovery::DiscoveredDevice {
+        device_id: "hb-b".into(), device_name: "B".into(),
+        hostname: "localhost".into(), platform: "test".into(),
+        ip_address: "127.0.0.1".into(), tcp_port: 55451,
+        last_seen: chrono::Utc::now(), first_seen: chrono::Utc::now(),
+    };
+    a.network.connect_to_device(&db).await.unwrap();
+    timeout(Duration::from_secs(3), a.event_rx.recv()).await.ok();
+    timeout(Duration::from_secs(3), b.event_rx.recv()).await.ok();
+
+    // 等待心跳周期（10s），验证连接未断开
+    tokio::time::sleep(Duration::from_secs(12)).await;
+
+    assert!(a.network.is_connected("hb-b"), "12s 后连接应仍存活");
+    assert_eq!(a.network.connected_count(), 1);
+
+    // 发送最终消息确认连接可用
+    let msg = Message::HeartbeatPing(app_lib::protocol::HeartbeatPayload {
+        device_id: "hb-a".into(),
+        timestamp: 999,
+    });
+    a.network.send("hb-b", &msg).unwrap();
+    let r = timeout(Duration::from_secs(3), b.event_rx.recv()).await;
+    assert!(r.is_ok(), "心跳后消息应可送达");
+}
+
+// ── 测试 10: 并发消息收发 ───────────────────
+
+#[tokio::test]
+async fn test_concurrent_bidirectional_messaging() {
+    let mut a = DeviceHarness::new("conc-a", 55452);
+    a.network.start().await.unwrap();
+    let mut b = DeviceHarness::new("conc-b", 55453);
+    b.network.start().await.unwrap();
+
+    let db = app_lib::discovery::DiscoveredDevice {
+        device_id: "conc-b".into(), device_name: "B".into(),
+        hostname: "localhost".into(), platform: "test".into(),
+        ip_address: "127.0.0.1".into(), tcp_port: 55453,
+        last_seen: chrono::Utc::now(), first_seen: chrono::Utc::now(),
+    };
+    a.network.connect_to_device(&db).await.unwrap();
+    timeout(Duration::from_secs(3), a.event_rx.recv()).await.ok();
+    timeout(Duration::from_secs(3), b.event_rx.recv()).await.ok();
+
+    // A 和 B 同时互发消息
+    let a_network = a.network.clone();
+    let b_network = b.network.clone();
+    let a_task = tokio::spawn(async move {
+        for i in 0..20 {
+            let msg = Message::ClipboardText(app_lib::protocol::ClipboardTextPayload {
+                source_device_id: "conc-a".into(),
+                content: format!("A→B msg {}", i),
+                timestamp: i,
+            });
+            a_network.send("conc-b", &msg).unwrap();
+        }
+    });
+    let b_task = tokio::spawn(async move {
+        for i in 0..20 {
+            let msg = Message::ClipboardText(app_lib::protocol::ClipboardTextPayload {
+                source_device_id: "conc-b".into(),
+                content: format!("B→A msg {}", i),
+                timestamp: i + 100,
+            });
+            b_network.send("conc-a", &msg).unwrap();
+        }
+    });
+
+    a_task.await.unwrap();
+    b_task.await.unwrap();
+
+    // 统计双向接收数
+    let mut a_rcv = 0u32;
+    let mut b_rcv = 0u32;
+    let deadline = Duration::from_secs(10);
+    let start = tokio::time::Instant::now();
+    while (a_rcv < 20 || b_rcv < 20) && start.elapsed() < deadline {
+        tokio::select! {
+            r = a.event_rx.recv() => {
+                if let Some(NetworkEvent::MessageReceived { .. }) = r { a_rcv += 1; }
+            },
+            r = b.event_rx.recv() => {
+                if let Some(NetworkEvent::MessageReceived { .. }) = r { b_rcv += 1; }
+            },
+            _ = tokio::time::sleep(Duration::from_millis(50)) => {},
+        }
+    }
+    assert!(a_rcv >= 15, "A 应收到大部分消息 (收到 {})", a_rcv);
+    assert!(b_rcv >= 15, "B 应收到大部分消息 (收到 {})", b_rcv);
+}
+
+// ── 测试 11: 空文本边缘情况 ─────────────────
+
+#[tokio::test]
+async fn test_empty_text_no_crash() {
+    let mut a = DeviceHarness::new("empty-a", 55454);
+    a.network.start().await.unwrap();
+    let mut b = DeviceHarness::new("empty-b", 55455);
+    b.network.start().await.unwrap();
+
+    let db = app_lib::discovery::DiscoveredDevice {
+        device_id: "empty-b".into(), device_name: "B".into(),
+        hostname: "localhost".into(), platform: "test".into(),
+        ip_address: "127.0.0.1".into(), tcp_port: 55455,
+        last_seen: chrono::Utc::now(), first_seen: chrono::Utc::now(),
+    };
+    a.network.connect_to_device(&db).await.unwrap();
+    timeout(Duration::from_secs(3), a.event_rx.recv()).await.ok();
+    timeout(Duration::from_secs(3), b.event_rx.recv()).await.ok();
+
+    // 空文本不应崩溃
+    let msg = Message::ClipboardText(app_lib::protocol::ClipboardTextPayload {
+        source_device_id: "empty-a".into(),
+        content: "".into(),
+        timestamp: 0,
+    });
+    let encoded = msg.encode().unwrap();
+    assert!(!encoded.is_empty(), "空文本消息也应可编码");
+
+    a.network.send("empty-b", &msg).unwrap();
+    let r = timeout(Duration::from_secs(3), b.event_rx.recv()).await;
+    assert!(r.is_ok(), "空文本消息应可送达");
+}
+
+// ── 测试 12: NoConnection 错误 ──────────────
+
+#[tokio::test]
+async fn test_no_connection_error_before_connect() {
+    let a = DeviceHarness::new("nc-a", 55456);
+    a.network.start().await.unwrap();
+
+    // 未连接任何设备时 broadcast 应返回 NoConnection
+    let msg = Message::ClipboardText(app_lib::protocol::ClipboardTextPayload {
+        source_device_id: "nc-a".into(),
+        content: "无人接收".into(),
+        timestamp: 0,
+    });
+    let result = a.network.broadcast(&msg);
+    assert!(result.is_err(), "无连接时 broadcast 应失败");
+    match result {
+        Err(app_lib::error::AppError::NoConnection) => {} // 预期
+        other => panic!("应返回 NoConnection，实际: {:?}", other),
+    }
+}
