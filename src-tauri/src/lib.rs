@@ -173,7 +173,8 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_fs::init());
+        .plugin(tauri_plugin_fs::init())
+        .plugin(tauri_plugin_log::Builder::default().build());
 
     // 桌面端专属插件
     #[cfg(not(any(target_os = "android", target_os = "ios")))]

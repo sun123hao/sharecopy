@@ -272,7 +272,7 @@ impl NetworkManager {
 
                         // 读取循环（read().await 由 reactor 唤醒，无轮询延迟）
                         // tokio::select! 同时等待数据到达和写任务退出信号
-                        let mut decoder2 = FrameDecoder::new();
+                        // 复用初始化的 decoder，避免丢失 DeviceInfo 之后的残留字节
                         let mut buf2 = vec![0u8; 65536];
                         let act = last_activity.clone();
                         let send_for_pong = connections.clone();
@@ -285,7 +285,7 @@ impl NetworkManager {
                                     match result {
                                         Ok(0) => break,
                                         Ok(n) => {
-                                            let msgs = decoder2.feed(&buf2[..n]);
+                                            let msgs = decoder.feed(&buf2[..n]);
                                             for msg in msgs {
                                                 match &msg {
                                                     Message::HeartbeatPing(_) | Message::HeartbeatPong(_) => {
