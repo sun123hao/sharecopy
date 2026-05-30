@@ -48,11 +48,16 @@ export const useAppStore = create<AppState>((set, get) => ({
       const backendDevices = await commands.getDevices() as DiscoveredDevice[];
       set((state) => {
         const backendIds = new Set(backendDevices.map((d) => d.device_id));
-        // 保留通过 device-online 事件添加且不在后端结果中的设备
+        // 保留不在后端结果中但由 device-online 事件添加的设备
         const keptOnline = state.devices.filter(
           (d) => !backendIds.has(d.device_id) && (d as any).__online
         );
-        return { devices: [...backendDevices, ...keptOnline] };
+        // 合并时保留已有设备的 __online 标记
+        const merged = backendDevices.map((d) => {
+          const existing = state.devices.find((e) => e.device_id === d.device_id);
+          return existing && (existing as any).__online ? { ...d, __online: true } : d;
+        });
+        return { devices: [...merged, ...keptOnline] };
       });
     } catch (e) {
       console.error('加载设备列表失败:', e);
