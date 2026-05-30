@@ -494,19 +494,27 @@ impl SyncEngine {
                     let device_name = device.device_name.clone();
                     let dev = device.clone();
                     let network = self.network.clone();
-                    // 后台重试：Windows TCP 可能尚未就绪，快速重试避免等 15s 周期
-                    tokio::spawn(async move {
+                    let reconnecting = self.reconnect_backoff.clone();
+                    let retry_id = dev.device_id.clone();
+                    // 防重复：已在重试中则跳过
+                    let already_retrying = reconnecting.contains_key(&retry_id);
+                    if !already_retrying {
+                        reconnecting.insert(retry_id.clone(), (Instant::now(), 0));
+                        // 后台重试：Windows TCP 可能尚未就绪，快速重试避免等 15s 周期
+                        tokio::spawn(async move {
                         let retry_delays = [0u64, 2, 5, 10];
                         for &delay in &retry_delays {
                             if delay > 0 {
                                 tokio::time::sleep(tokio::time::Duration::from_secs(delay)).await;
                             }
                             if network.is_connected(&dev.device_id) {
-                                return; // 已连接（可能由对方发起）
+                                reconnecting.remove(&retry_id);
+                                return;
                             }
                             match network.connect_to_device(&dev).await {
                                 Ok(()) => {
                                     tracing::info!("连接 {} 成功", dev.device_name);
+                                    reconnecting.remove(&retry_id);
                                     return;
                                 }
                                 Err(e) => {
@@ -514,8 +522,10 @@ impl SyncEngine {
                                 }
                             }
                         }
+                        reconnecting.remove(&retry_id);
                         tracing::warn!("连接 {} 最终失败", device_name);
-                    });
+                        });
+                    } // !already_retrying
                 } else {
                     tracing::debug!(
                         "设备 {} 等待对方主动连接（30s 超时后回退）",
@@ -824,7 +834,6 @@ impl SyncEngine {
     /// 主动刷新 mDNS 发现（发送新查询，加速发现后启动的设备）
     pub fn refresh_discovery(&self) {
         if let Ok(mut discovery) = self.discovery.lock() {
-            // 不重启浏览器，仅在当前 browser 基础上重新 browse
             if let Err(e) = discovery.rebrowse() {
                 tracing::warn!("mDNS rebrowse 失败: {}", e);
             }

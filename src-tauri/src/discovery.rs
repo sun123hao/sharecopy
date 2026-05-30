@@ -44,6 +44,8 @@ pub struct DiscoveryService {
     my_ip: Option<std::net::IpAddr>,
     /// 防止重复创建浏览器线程（改名时 re-register 会再次调用 start）
     browser_started: bool,
+    /// rebrowse 创建的额外浏览器（保持存活）
+    extra_browsers: Vec<mdns_sd::Receiver<ServiceEvent>>,
 }
 
 impl DiscoveryService {
@@ -83,6 +85,7 @@ impl DiscoveryService {
             tcp_port,
             my_ip,
             browser_started: false,
+            extra_browsers: Vec::new(),
         })
     }
 
@@ -185,10 +188,11 @@ impl DiscoveryService {
     }
 
     /// 重新发送 mDNS 查询（不重启浏览器，仅发送新查询包）
-    pub fn rebrowse(&self) -> AppResult<()> {
+    pub fn rebrowse(&mut self) -> AppResult<()> {
         self.mdns
             .browse(SERVICE_TYPE)
-            .map(|_rx| {
+            .map(|rx| {
+                self.extra_browsers.push(rx);
                 tracing::debug!("mDNS rebrowse 已发送");
             })
             .map_err(|e| {
