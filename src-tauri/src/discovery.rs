@@ -346,10 +346,12 @@ impl DiscoveryService {
                     .map(|v| v.to_string())
                     .unwrap_or_else(|| "unknown".to_string());
 
+                // 优先选择 IPv4 地址（Windows 可能只监听 IPv4）
                 let ip_address = info
                     .get_addresses()
                     .iter()
-                    .next()
+                    .find(|a| a.is_ipv4())
+                    .or_else(|| info.get_addresses().iter().next())
                     .map(|a| a.to_string())
                     .unwrap_or_default();
 
