@@ -553,8 +553,18 @@ impl SyncEngine {
                     );
                 }
             }
-            DiscoveryEvent::DeviceLost(_device_id) => {
-                // 连接管理器会自动处理断开
+            DiscoveryEvent::DeviceLost(device_id) => {
+                // 仅当 TCP 也已断开时通知前端（防止 mDNS 丢包误判）
+                if !self.network.is_connected(&device_id) {
+                    tracing::info!("mDNS 设备消失且 TCP 已断开，通知前端: {}", device_id);
+                    let _ = self.app_handle.emit("device-offline", &device_id);
+                    self.connected_info.remove(&device_id);
+                } else {
+                    tracing::debug!(
+                        "mDNS 设备 {} 消失但 TCP 仍连接，等待心跳超时",
+                        device_id
+                    );
+                }
             }
         }
     }
