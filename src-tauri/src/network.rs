@@ -328,7 +328,7 @@ impl NetworkManager {
                         // 读取循环（read().await 由 reactor 唤醒，无轮询延迟）
                         // tokio::select! 同时等待数据到达和写任务退出信号
                         // 复用初始化的 decoder，避免丢失 DeviceInfo 之后的残留字节
-                        let mut buf2 = vec![0u8; 65536];
+                        let mut buf2 = vec![0u8; 1024 * 1024]; // 1MB 读缓冲，减少 Android 上 read/select 循环次数
                         let act = last_activity.clone();
                         let send_for_pong = connections.clone();
                         let remote_rid = remote_device_id.clone();
