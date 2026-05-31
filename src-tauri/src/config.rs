@@ -10,6 +10,9 @@ pub struct AppConfig {
     /// 用户是否自定义过设备名（防止 Android 自动覆盖）
     #[serde(default)]
     pub name_customized: bool,
+    /// 用户是否自定义过保存目录（防止 Android 启动时自动覆盖）
+    #[serde(default)]
+    pub save_dir_customized: bool,
     /// 本机唯一标识（首次启动生成 UUID v4）
     pub device_id: String,
     /// TCP 通信端口
@@ -31,6 +34,7 @@ impl Default for AppConfig {
     fn default() -> Self {
         Self {
             name_customized: false,
+            save_dir_customized: false,
             device_name: hostname::get()
                 .unwrap_or_default()
                 .to_string_lossy()

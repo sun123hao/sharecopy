@@ -97,7 +97,21 @@ async fn update_config(
     new_config: AppConfig,
 ) -> Result<(), String> {
     let mut config = state.config.write().await;
-    *config = new_config;
+    // 检测 save_dir 是否被用户修改，标记为自定义以防 Android 启动时覆盖
+    if new_config.save_dir != config.save_dir {
+        config.save_dir = new_config.save_dir;
+        config.save_dir_customized = true;
+    }
+    // 同步其他字段
+    config.device_name = new_config.device_name;
+    config.name_customized = new_config.name_customized;
+    config.device_id = new_config.device_id;
+    config.tcp_port = new_config.tcp_port;
+    config.auto_start = new_config.auto_start;
+    config.sync_enabled = new_config.sync_enabled;
+    config.auto_accept_files = new_config.auto_accept_files;
+    config.poll_interval_active_ms = new_config.poll_interval_active_ms;
+    config.poll_interval_idle_ms = new_config.poll_interval_idle_ms;
     config.save().map_err(|e| e.to_string())
 }
 
@@ -325,17 +339,22 @@ pub fn run() {
             }
 
             // Android: 用 JNI 获取外部文件目录作为默认保存路径
+            // 仅在用户未自定义过保存目录时才自动覆盖（避免覆盖用户设置）
             #[cfg(target_os = "android")]
             {
-                let default_save = android_file::get_default_save_dir();
-                match default_save {
-                    Ok(dir) => {
-                        if std::fs::create_dir_all(&dir).is_ok() {
-                            tracing::info!("Android 默认保存路径: {}", dir.display());
-                            app_config.save_dir = dir;
+                if !app_config.save_dir_customized {
+                    let default_save = android_file::get_default_save_dir();
+                    match default_save {
+                        Ok(dir) => {
+                            if std::fs::create_dir_all(&dir).is_ok() {
+                                tracing::info!("Android 默认保存路径: {}", dir.display());
+                                app_config.save_dir = dir;
+                            }
                         }
+                        Err(e) => tracing::warn!("获取 Android 保存目录失败: {}", e),
                     }
-                    Err(e) => tracing::warn!("获取 Android 保存目录失败: {}", e),
+                } else {
+                    tracing::info!("Android 保存目录已由用户自定义: {}", app_config.save_dir.display());
                 }
             }
 
