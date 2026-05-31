@@ -33,3 +33,4 @@ docs/
 *.njsproj
 *.sln
 *.sw?
+*.keystore

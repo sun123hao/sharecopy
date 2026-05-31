@@ -123,6 +123,14 @@ jobs:
       - name: 安装依赖
         run: npm ci
 
+      - name: 恢复签名密钥
+        run: |
+          echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > src-tauri/release.keystore
+          echo "ANDROID_KEYSTORE_PATH=$(pwd)/src-tauri/release.keystore" >> $GITHUB_ENV
+          echo "ANDROID_KEYSTORE_PASSWORD=${{ secrets.ANDROID_KEYSTORE_PASSWORD }}" >> $GITHUB_ENV
+          echo "ANDROID_KEY_PASSWORD=${{ secrets.ANDROID_KEY_PASSWORD }}" >> $GITHUB_ENV
+          echo "ANDROID_KEY_ALIAS=${{ secrets.ANDROID_KEY_ALIAS }}" >> $GITHUB_ENV
+
       - name: 构建 (Tauri Android Debug)
         run: npm run tauri android build -- --debug
 
@@ -166,6 +174,14 @@ jobs:
 
       - name: 安装依赖
         run: npm ci
+
+      - name: 恢复签名密钥
+        run: |
+          echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > src-tauri/release.keystore
+          echo "ANDROID_KEYSTORE_PATH=$(pwd)/src-tauri/release.keystore" >> $GITHUB_ENV
+          echo "ANDROID_KEYSTORE_PASSWORD=${{ secrets.ANDROID_KEYSTORE_PASSWORD }}" >> $GITHUB_ENV
+          echo "ANDROID_KEY_PASSWORD=${{ secrets.ANDROID_KEY_PASSWORD }}" >> $GITHUB_ENV
+          echo "ANDROID_KEY_ALIAS=${{ secrets.ANDROID_KEY_ALIAS }}" >> $GITHUB_ENV
 
       - name: 构建 (Tauri Android Release)
         run: npm run tauri android build
