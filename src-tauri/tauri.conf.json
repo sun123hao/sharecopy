@@ -36,14 +36,6 @@
     ],
     "macOS": {
       "signingIdentity": "-"
-    },
-    "android": {
-      "signing": {
-        "keystorePath": "{{ env.ANDROID_KEYSTORE_PATH || 'release.keystore' }}",
-        "keystorePassword": "{{ env.ANDROID_KEYSTORE_PASSWORD }}",
-        "keyAlias": "{{ env.ANDROID_KEY_ALIAS || 'sharecopy' }}",
-        "keyPassword": "{{ env.ANDROID_KEY_PASSWORD }}"
-      }
     }
   },
   "plugins": {}
