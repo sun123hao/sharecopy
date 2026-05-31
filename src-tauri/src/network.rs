@@ -183,7 +183,10 @@ impl NetworkManager {
         last_activity: Arc<DashMap<String, Instant>>,
         notified: Arc<DashMap<String, ()>>,
     ) -> AppResult<()> {
-        // 等待握手消息（用 read().await，完整 TcpStream 无 split 问题）
+        // TCP 优化：禁用 Nagle，减少小包延迟
+        stream.set_nodelay(true).ok();
+
+        // 等待握手消息
         let mut decoder = FrameDecoder::new();
         let mut buf = vec![0u8; 65536];
 
@@ -275,7 +278,7 @@ impl NetworkManager {
                         }
 
                         // 启动读写（tokio::io::split 用 Mutex 协调 reactor，read() 安全）
-                        let (mut read_half, mut write_half) = tokio::io::split(stream);
+                        let (mut read_half, mut write_half) = stream.into_split();
 
                         // oneshot 通道：写任务退出时通知读循环立即清理，避免半死连接
                         let (write_done_tx, mut write_done_rx) =
@@ -430,6 +433,9 @@ impl NetworkManager {
             }
         };
 
+        // TCP 优化：禁用 Nagle
+        stream.set_nodelay(true).ok();
+
         // 发送握手消息
         let handshake = Message::DeviceInfo(crate::protocol::DeviceInfoPayload {
             device_id: self.device_id.clone(),
@@ -481,7 +487,7 @@ impl NetworkManager {
         }
 
         // 后台任务处理读写（tokio::io::split 用 Mutex 协调 reactor，read() 安全）
-        let (mut read_half, mut write_half) = tokio::io::split(stream);
+        let (mut read_half, mut write_half) = stream.into_split();
         let conns = self.connections.clone();
         let evt = self.event_tx.clone();
         let remote_id = device.device_id.clone();
@@ -591,6 +597,18 @@ impl NetworkManager {
         });
 
         Ok(())
+    }
+
+    /// 发送已编码的字节到指定设备（跳过重复 encode，用于预编码的批量发送）
+    pub fn send_raw(&self, target_device_id: &str, encoded: Vec<u8>) -> AppResult<()> {
+        let tx = self
+            .connections
+            .get(target_device_id)
+            .ok_or_else(|| AppError::Network(std::io::Error::new(
+                std::io::ErrorKind::NotConnected,
+                format!("设备未连接: {}", target_device_id),
+            )))?;
+        tx.send(encoded).map_err(|_| AppError::ChannelSend)
     }
 
     /// 发送消息到指定设备
