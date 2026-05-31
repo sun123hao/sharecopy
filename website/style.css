@@ -246,3 +246,177 @@ img {
     grid-template-columns: 1fr;
   }
 }
+
+/* ========================================
+   支持平台
+   ======================================== */
+.platforms {
+  padding: 80px 24px;
+  background: var(--color-card-bg);
+}
+
+.platforms-grid {
+  max-width: var(--max-width);
+  margin: 0 auto;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 24px;
+}
+
+.platform-card {
+  text-align: center;
+  padding: 32px 24px;
+  background: #fff;
+  border-radius: 20px;
+  transition: transform 0.3s ease, box-shadow 0.3s ease;
+}
+
+.platform-card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.04);
+}
+
+.platform-icon {
+  font-size: 44px;
+  margin-bottom: 12px;
+}
+
+.platform-name {
+  font-size: 22px;
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+
+.platform-detail {
+  font-size: 14px;
+  color: var(--color-text-secondary);
+  margin-bottom: 20px;
+}
+
+.platform-dl {
+  display: inline-block;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-accent);
+  padding: 8px 24px;
+  border: 1.5px solid var(--color-accent);
+  border-radius: 20px;
+  transition: background 0.2s, color 0.2s;
+}
+
+.platform-dl:hover {
+  background: var(--color-accent);
+  color: #fff;
+}
+
+/* ========================================
+   三步开始
+   ======================================== */
+.steps {
+  padding: 80px 24px;
+  max-width: 800px;
+  margin: 0 auto;
+}
+
+.steps-list {
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 0;
+}
+
+.step-item {
+  text-align: center;
+  flex: 1;
+}
+
+.step-number {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--color-accent), var(--color-accent-end));
+  color: #fff;
+  font-size: 22px;
+  font-weight: 700;
+  margin-bottom: 16px;
+}
+
+.step-title {
+  font-size: 18px;
+  font-weight: 700;
+  margin-bottom: 6px;
+}
+
+.step-desc {
+  font-size: 14px;
+  color: var(--color-text-secondary);
+  line-height: 1.5;
+}
+
+.step-divider {
+  width: 40px;
+  height: 2px;
+  background: var(--color-border);
+  margin-top: 24px;
+  flex-shrink: 0;
+}
+
+/* ========================================
+   Footer
+   ======================================== */
+.footer {
+  padding: 32px 24px;
+  border-top: 1px solid var(--color-border);
+}
+
+.footer-inner {
+  max-width: var(--max-width);
+  margin: 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 24px;
+}
+
+.footer-github {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 14px;
+  color: var(--color-text-secondary);
+  transition: color 0.2s;
+}
+
+.footer-github:hover {
+  color: var(--color-text);
+}
+
+.footer-copy {
+  font-size: 14px;
+  color: var(--color-text-secondary);
+}
+
+/* ========================================
+   响应式：Steps
+   ======================================== */
+@media (max-width: 640px) {
+  .steps-list {
+    flex-direction: column;
+    align-items: center;
+    gap: 32px;
+  }
+
+  .step-divider {
+    width: 2px;
+    height: 24px;
+  }
+
+  .platforms-grid {
+    grid-template-columns: 1fr;
+    max-width: 360px;
+    margin: 0 auto;
+  }
+}
