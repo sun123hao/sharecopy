@@ -94,38 +94,29 @@ export function Settings({ theme, setTheme }: { theme: Theme; setTheme: (t: Them
       <div className={groupClass}>
         <div className={groupHeaderClass}>设备信息</div>
         <div className={rowClass}>
-          <span className="text-[15px]">设备名称</span>
-          <input
-            type="text" value={deviceName}
-            onChange={(e) => setDeviceName(e.target.value)}
-            placeholder="输入设备名称"
-            className="text-right text-[15px] bg-transparent text-black dark:text-white placeholder:text-black/20 dark:placeholder:text-white/20 focus:outline-none"
-          />
+          <span className="text-[15px]">名称</span>
+          <div className="flex items-center gap-2">
+            <input
+              type="text" value={deviceName}
+              onChange={(e) => setDeviceName(e.target.value)}
+              placeholder="输入设备名称"
+              className="text-right text-[15px] bg-transparent text-black dark:text-white placeholder:text-black/20 dark:placeholder:text-white/20 focus:outline-none w-32"
+            />
+            <button
+              onClick={() => { if (deviceName && deviceName !== config?.device_name) updateDeviceName(deviceName); }}
+              className="text-[13px] text-accent font-medium hover:opacity-70 transition-opacity"
+            >保存</button>
+          </div>
         </div>
         {config && (
-          <>
-            <div className={rowClass}>
-              <span className="text-[15px]">端口</span>
-              <span className="text-[15px] text-black/60 dark:text-white/60">{config.tcp_port}</span>
-            </div>
-            <div className={rowClass}>
-              <span className="text-[15px]">设备 ID</span>
-              <span className="text-[11px] text-black/30 dark:text-white/30 font-mono">{config.device_id.slice(0, 8)}…</span>
-            </div>
-            <div className={rowClass}>
-              <span className="text-[15px]">系统</span>
-              <span className="text-[11px] text-ios-green bg-ios-green/10 px-3 py-0.5 rounded-full border border-ios-green/20">在线</span>
-            </div>
-          </>
+          <div className={rowClass}>
+            <span className="text-[15px]">信息</span>
+            <span className="text-[13px] text-black/40 dark:text-white/40">
+              端口 {config.tcp_port} · {config.device_id.slice(0, 8)}…
+              <span className="ml-2 text-[11px] text-ios-green bg-ios-green/10 px-2 py-0.5 rounded-full border border-ios-green/20">在线</span>
+            </span>
+          </div>
         )}
-        <div className="flex justify-end px-[18px] pb-[14px] pt-1">
-          <button
-            onClick={() => { if (deviceName && deviceName !== config?.device_name) updateDeviceName(deviceName); }}
-            className="px-5 py-2 rounded-[10px] bg-accent text-white text-[15px] font-medium shadow-[0_2px_8px_rgba(0,122,255,0.3)] hover:scale-[0.98] active:scale-95 transition-all duration-200"
-          >
-            保存名称
-          </button>
-        </div>
       </div>
 
       {/* 保存路径 */}
