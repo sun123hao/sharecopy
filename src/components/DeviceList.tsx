@@ -28,7 +28,6 @@ function deviceColor(name: string): string {
 
 export function DeviceList({ onSelectDevice }: { onSelectDevice?: (deviceId: string) => void }) {
   const devices = useAppStore((s) => s.devices);
-  const config = useAppStore((s) => s.config);
   const addDevice = useAppStore((s) => s.addDevice);
   const removeDevice = useAppStore((s) => s.removeDevice);
   const loadConfig = useAppStore((s) => s.loadConfig);
@@ -147,19 +146,6 @@ export function DeviceList({ onSelectDevice }: { onSelectDevice?: (deviceId: str
         </div>
       )}
 
-      {/* 本机信息 */}
-      <div className="mt-5 p-4 rounded-[20px] ios-card border border-white/10 dark:border-white/5">
-        <div className="flex items-center justify-between mb-1.5">
-          <span className="text-[11px] font-medium text-black/40 dark:text-white/40 uppercase tracking-[0.05em]">本机</span>
-          <span className="text-[11px] font-medium text-ios-green bg-ios-green/10 px-3 py-1 rounded-full border border-ios-green/20">
-            在线
-          </span>
-        </div>
-        <p className="text-[15px] font-medium">{config?.device_name ?? '此设备'}</p>
-        <p className="text-[12px] text-black/40 dark:text-white/40 mt-1">
-          端口 {config?.tcp_port ?? 54322} · 等待其他设备连接…
-        </p>
-      </div>
     </div>
   );
 }

@@ -90,7 +90,7 @@ export function Settings({ theme, setTheme }: { theme: Theme; setTheme: (t: Them
 
   return (
     <div>
-      {/* 设备名称 */}
+      {/* 设备信息 */}
       <div className={groupClass}>
         <div className={groupHeaderClass}>设备信息</div>
         <div className={rowClass}>
@@ -102,6 +102,22 @@ export function Settings({ theme, setTheme }: { theme: Theme; setTheme: (t: Them
             className="text-right text-[15px] bg-transparent text-black dark:text-white placeholder:text-black/20 dark:placeholder:text-white/20 focus:outline-none"
           />
         </div>
+        {config && (
+          <>
+            <div className={rowClass}>
+              <span className="text-[15px]">端口</span>
+              <span className="text-[15px] text-black/60 dark:text-white/60">{config.tcp_port}</span>
+            </div>
+            <div className={rowClass}>
+              <span className="text-[15px]">设备 ID</span>
+              <span className="text-[11px] text-black/30 dark:text-white/30 font-mono">{config.device_id.slice(0, 8)}…</span>
+            </div>
+            <div className={rowClass}>
+              <span className="text-[15px]">系统</span>
+              <span className="text-[11px] text-ios-green bg-ios-green/10 px-3 py-0.5 rounded-full border border-ios-green/20">在线</span>
+            </div>
+          </>
+        )}
         <div className="flex justify-end px-[18px] pb-[14px] pt-1">
           <button
             onClick={() => { if (deviceName && deviceName !== config?.device_name) updateDeviceName(deviceName); }}
