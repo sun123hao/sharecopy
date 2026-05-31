@@ -8,6 +8,8 @@ import { TransferProgressPanel } from './components/TransferProgress';
 type Page = 'devices' | 'settings' | 'history';
 type Theme = 'system' | 'light' | 'dark';
 
+// 注意：此 key 和 applyTheme 逻辑与 index.html 内联脚本重复，
+// 修改时必须两处同步更新，否则会导致初始主题闪烁或不同步。
 const THEME_KEY = 'sharecopy-theme';
 
 function getStoredTheme(): Theme {
@@ -41,18 +43,19 @@ function App() {
     applyTheme(t);
   };
 
-  // 初始化主题
+  // 监听系统主题变化
+  // 注：初始主题已在 index.html 同步脚本中应用（避免闪烁），此处 applyTheme
+  // 作为安全网：若内联脚本因 CSP/扩展等原因未执行，挂载时仍能恢复正确主题
   useEffect(() => {
-    applyTheme(theme);
+    applyTheme(getStoredTheme());
 
-    // 跟随系统主题变化
     const mq = window.matchMedia('(prefers-color-scheme: dark)');
     const handler = () => {
-      if (theme === 'system') applyTheme('system');
+      if (getStoredTheme() === 'system') applyTheme('system');
     };
     mq.addEventListener('change', handler);
     return () => mq.removeEventListener('change', handler);
-  }, [theme]);
+  }, []);
 
   const navItems: { id: Page; label: string; icon: typeof Monitor }[] = [
     { id: 'devices', label: '设备', icon: Monitor },

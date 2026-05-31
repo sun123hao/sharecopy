@@ -30,17 +30,20 @@ export function useDragDropFiles() {
   // 当前悬停的设备 ID — 用 ref 避免 over 事件频繁触发 state 更新
   const hoveredDeviceIdRef = useRef<string | null>(null);
   // 用于驱动 UI 重渲染的 state 副本（仅在值变化时更新）
-  const [hoveredDeviceId, setHoveredDeviceId] = useState<string | null>(null);
+  const [hoveredDeviceId, setHoveredDevice] = useState<string | null>(null);
 
   /** 根据平台获取标题栏高度（Tauri 窗口坐标 → webview 内容坐标的 Y 轴偏移） */
   const titleBarHeight = useRef(0);
+
+  /** 设备卡片 bounding rect 缓存，避免 over 事件中反复触发强制同步布局 */
+  const cardsRectsRef = useRef<Map<string, DOMRect>>(new Map());
 
   /** 将 Tauri 窗口坐标转为 webview 内容区 CSS 坐标 */
   const toCssPosition = useCallback((x: number, y: number) => {
     return { x, y: y - titleBarHeight.current };
   }, []);
 
-  /** 通过坐标命中检测找到目标设备 ID */
+  /** 通过坐标命中检测找到目标设备 ID（精确匹配：光标正在卡片元素上） */
   const findDeviceAtPoint = useCallback((x: number, y: number): string | null => {
     // 使用 elementsFromPoint（复数）处理嵌套元素，比 elementFromPoint 更可靠
     const els = document.elementsFromPoint(x, y);
@@ -53,20 +56,56 @@ export function useDragDropFiles() {
     return null;
   }, []);
 
-  /** 更新悬停设备（仅在值变化时触发 state 更新） */
+  /**
+   * 就近匹配回退：当光标不在具体卡片上时（如卡片间隙、边距区域），
+   * 按 Y 坐标找到最近的设备卡片。使用缓存的 bounding rect 避免强制布局。
+   */
+  const findNearestDevice = useCallback((x: number, y: number): string | null => {
+    const cached = cardsRectsRef.current;
+    if (cached.size === 0) return null;
+
+    let closest: string | null = null;
+    let minDist = Infinity;
+    cached.forEach((rect, deviceId) => {
+      // X 轴落在卡片水平范围内（含少量容差，确保宽度足够）
+      if (x < rect.left - 10 || x > rect.right + 10) return;
+      // 计算到卡片的垂直距离（光标在卡片内部时距离为 0）
+      const dist = y < rect.top ? rect.top - y
+        : y > rect.bottom ? y - rect.bottom
+        : 0;
+      if (dist < minDist) {
+        minDist = dist;
+        closest = deviceId;
+      }
+    });
+    return closest;
+  }, []);
+
+  /** 更新悬停设备（仅在值变化时触发 state 更新，避免 over 事件频繁重渲染） */
   const updateHoveredDevice = useCallback((deviceId: string | null) => {
     const prev = hoveredDeviceIdRef.current;
     hoveredDeviceIdRef.current = deviceId;
     if (prev !== deviceId) {
-      setHoveredDeviceId(deviceId);
+      setHoveredDevice(deviceId);
     }
+  }, []);
+
+  /** 缓存所有设备卡片的 bounding rect（在 enter 时调用，避免 over 事件中反复查询） */
+  const cacheCards = useCallback(() => {
+    const map = cardsRectsRef.current;
+    map.clear();
+    document.querySelectorAll('[data-drop-device]').forEach((card) => {
+      const id = (card as HTMLElement).dataset.dropDevice;
+      if (id) map.set(id, card.getBoundingClientRect());
+    });
   }, []);
 
   /** 重置所有拖放状态 */
   const resetDrag = useCallback(() => {
     setDragState({ phase: 'idle', position: null, fileCount: 0 });
     hoveredDeviceIdRef.current = null;
-    setHoveredDeviceId(null);
+    setHoveredDevice(null);
+    cardsRectsRef.current.clear();
     document.body.classList.remove('is-dragging');
   }, []);
 
@@ -100,6 +139,8 @@ export function useDragDropFiles() {
               position: pos,
               fileCount: event.payload.paths.length,
             });
+            // 缓存设备卡片位置，避免 over 事件中反复触发强制布局
+            cacheCards();
             document.body.classList.add('is-dragging');
             break;
           }
@@ -110,8 +151,8 @@ export function useDragDropFiles() {
               event.payload.position.y,
             );
             setDragState(prev => ({ ...prev, position: pos }));
-            // 命中检测：找到光标下的设备卡片
-            const deviceId = findDeviceAtPoint(pos.x, pos.y);
+            // 精确命中优先，回退到就近匹配（解决卡片间隙无法匹配的问题）
+            const deviceId = findDeviceAtPoint(pos.x, pos.y) ?? findNearestDevice(pos.x, pos.y);
             updateHoveredDevice(deviceId);
             break;
           }
@@ -123,9 +164,11 @@ export function useDragDropFiles() {
               event.payload.position.y,
             );
 
-            // 优先使用 over 事件中记录的最后悬停设备
+            // 优先级：over 记录 > 精确命中 > 就近匹配
             const lastHovered = hoveredDeviceIdRef.current;
-            const targetDeviceId = lastHovered ?? findDeviceAtPoint(pos.x, pos.y);
+            const targetDeviceId = lastHovered
+              ?? findDeviceAtPoint(pos.x, pos.y)
+              ?? findNearestDevice(pos.x, pos.y);
 
             if (targetDeviceId && paths.length > 0) {
               sendFiles(paths, targetDeviceId).catch((err) => {
@@ -158,7 +201,7 @@ export function useDragDropFiles() {
       if (unlisten) unlisten();
       document.body.classList.remove('is-dragging');
     };
-  }, [toCssPosition, findDeviceAtPoint, updateHoveredDevice, resetDrag]);
+  }, [toCssPosition, findDeviceAtPoint, findNearestDevice, cacheCards, updateHoveredDevice, resetDrag]);
 
   return { dragState, hoveredDeviceId };
 }

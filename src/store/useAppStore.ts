@@ -122,7 +122,7 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   updateTransferProgress: (p: TransferProgress) => {
     set((state) => {
-      const idx = state.transfers.findIndex((t) => t.file_name === p.file_name);
+      const idx = state.transfers.findIndex((t) => t.transfer_id === p.transfer_id);
       if (idx >= 0) {
         const updated = [...state.transfers];
         updated[idx] = p;

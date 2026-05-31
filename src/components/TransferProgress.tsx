@@ -8,6 +8,7 @@ export function TransferProgressPanel() {
 
   useTransferProgress((p) => {
     updateTransferProgress({
+      transfer_id: (p as any).transfer_id ?? p.file_name,
       file_name: p.file_name,
       progress: Math.round(p.progress * 100),
       state: p.state as 'pending' | 'transferring' | 'completed' | 'failed',
@@ -21,7 +22,7 @@ export function TransferProgressPanel() {
       <p className="text-[11px] font-medium text-slate-500 dark:text-slate-400">传输进度</p>
       {transfers.slice(-3).map((t) => (
         <div
-          key={t.file_name}
+          key={t.transfer_id}
           className="flex items-center gap-3 p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-700"
         >
           {t.state === 'completed' ? (

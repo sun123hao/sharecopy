@@ -1,10 +1,30 @@
 <!doctype html>
-<html lang="en">
+<html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/png" href="/favicon.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>sharecopy-scaffold</title>
+    <title>ShareCopy</title>
+    <!--
+      同步应用主题，防止页面闪烁：必须在任何内容渲染前执行。
+      注意：此脚本与 src/App.tsx 中的 applyTheme/getStoredTheme 逻辑重复，
+      修改 localStorage key 或 dark 类名时必须两处同步更新。
+    -->
+    <script>
+      (function() {
+        try {
+          var theme = localStorage.getItem('sharecopy-theme');
+          if (theme === 'dark') {
+            document.documentElement.classList.add('dark');
+          } else if (theme === 'system' || !theme) {
+            if (window.matchMedia('(prefers-color-scheme: dark)').matches) {
+              document.documentElement.classList.add('dark');
+            }
+          }
+          // theme === 'light' 时无需操作，默认即为亮色
+        } catch(e) {}
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

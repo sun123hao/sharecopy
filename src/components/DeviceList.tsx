@@ -96,12 +96,12 @@ export function DeviceList() {
           </p>
         </div>
       ) : (
-        <div className="space-y-2">
+        <div className="space-y-2 w-full">
           {devices.map((device) => (
             <div
               key={device.device_id}
               data-drop-device={device.device_id}
-              className={`flex items-center gap-3 p-3 rounded-xl bg-white dark:bg-slate-800 shadow-sm transition-all duration-200${
+              className={`w-full flex items-center gap-3 p-3 rounded-xl bg-white dark:bg-slate-800 shadow-sm transition-all duration-200${
                 dragState.phase === 'dragging'
                   ? ' border-2 border-dashed border-amber-300/60 dark:border-amber-500/40 cursor-copy'
                   : ' border border-slate-200 dark:border-slate-700 hover:shadow-md hover:border-slate-300 dark:hover:border-slate-600'

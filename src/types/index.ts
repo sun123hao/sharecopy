@@ -32,6 +32,7 @@ export interface SyncStats {
 export type TransferState = 'pending' | 'transferring' | 'completed' | 'failed';
 
 export interface TransferProgress {
+  transfer_id: string;
   file_name: string;
   progress: number; // 0-100
   state: TransferState;
