@@ -287,16 +287,27 @@ impl NetworkManager {
                         let write_handle = {
                             let remote_id = remote_device_id.clone();
                             tokio::spawn(async move {
-                                while let Some(data) = send_rx.recv().await {
-                                    // 写入带超时：TCP 重传超时可能长达 1-2 分钟，
-                                    // 用 tokio::time::timeout 在 5 秒内检测到死连接
+                                // 批量写入：合并通道中所有可用的数据块，单次 write_all 减少 syscall
+                                loop {
+                                    let Some(mut batch) = send_rx.recv().await else { break };
+                                    // 尽量合并，最多 8 块（8 × 64KB = 512KB / 次写入）
+                                    let mut count = 1;
+                                    while count < 8 {
+                                        match send_rx.try_recv() {
+                                            Ok(data) => {
+                                                batch.extend_from_slice(&data);
+                                                count += 1;
+                                            }
+                                            Err(_) => break,
+                                        }
+                                    }
                                     match tokio::time::timeout(
                                         tokio::time::Duration::from_secs(WRITE_TIMEOUT_SECS),
-                                        write_half.write_all(&data),
+                                        write_half.write_all(&batch),
                                     )
                                     .await
                                     {
-                                        Ok(Ok(())) => {} // 写入成功
+                                        Ok(Ok(())) => {}
                                         Ok(Err(e)) => {
                                             tracing::error!("写入 {} 失败: {}", remote_id, e);
                                             break;
