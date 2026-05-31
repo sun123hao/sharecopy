@@ -55,7 +55,7 @@ export function ClipboardHistory() {
         ].map((s) => {
           const Icon = s.icon;
           return (
-            <div key={s.label} className="p-3 rounded-[16px] glass-thin border border-white/10 text-center">
+            <div key={s.label} className="p-3 rounded-[16px] ios-card border border-white/10 text-center">
               <Icon className={`w-[18px] h-[18px] ${s.color} mx-auto mb-1.5`} />
               <p className="text-[20px] font-semibold">{s.n}</p>
               <p className="text-[11px] text-black/40 dark:text-white/40">{s.label}</p>
@@ -66,7 +66,7 @@ export function ClipboardHistory() {
 
       {entries.length === 0 ? (
         <div className="text-center py-16">
-          <div className="w-[68px] h-[68px] mx-auto mb-4 rounded-[20px] glass-thin border border-white/10 flex items-center justify-center">
+          <div className="w-[68px] h-[68px] mx-auto mb-4 rounded-[20px] ios-card border border-white/10 flex items-center justify-center">
             <ClipboardList className="w-7 h-7 text-black/15 dark:text-white/15" />
           </div>
           <p className="text-[15px] text-black/60 dark:text-white/60">暂无同步记录</p>
@@ -81,7 +81,7 @@ export function ClipboardHistory() {
               <input
                 type="text" placeholder="搜索历史…" value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                className="w-full pl-9 pr-8 py-2.5 text-[15px] rounded-[14px] glass-thin border border-white/10 bg-transparent text-black dark:text-white placeholder:text-black/20 dark:placeholder:text-white/20 focus:outline-none focus:border-accent/40 transition-all"
+                className="w-full pl-9 pr-8 py-2.5 text-[15px] rounded-[14px] ios-card border border-white/10 bg-transparent text-black dark:text-white placeholder:text-black/20 dark:placeholder:text-white/20 focus:outline-none focus:border-accent/40 transition-all"
               />
               {search && (
                 <button onClick={() => setSearch('')} className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1 rounded-[6px] hover:bg-black/5 dark:hover:bg-white/5">
@@ -97,7 +97,7 @@ export function ClipboardHistory() {
             ) : (
               filteredEntries.map((entry) => (
                 <div key={entry.id}
-                  className="group flex items-start gap-3 p-3 rounded-[16px] glass-thin border border-white/10 hover:border-accent/20 transition-all duration-200"
+                  className="group flex items-start gap-3 p-3 rounded-[16px] ios-card border border-white/10 hover:border-accent/20 transition-all duration-200"
                 >
                   <div className="flex-shrink-0 mt-0.5">
                     {entry.type === 'text'

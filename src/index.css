@@ -15,18 +15,17 @@
   --color-ios-orange: #FF9500;
   --color-ios-purple: #AF52DE;
   --color-ios-pink: #FF2D55;
-  /* iOS 18+ 毛玻璃层级 */
-  --color-glass-thin: rgba(255, 255, 255, 0.50);
-  --color-glass-regular: rgba(255, 255, 255, 0.72);
-  --color-glass-thick: rgba(255, 255, 255, 0.90);
-  --color-glass-dark-thin: rgba(30, 30, 32, 0.50);
-  --color-glass-dark-regular: rgba(30, 30, 32, 0.72);
-  --color-glass-dark-thick: rgba(30, 30, 32, 0.90);
+  /* 毛玻璃 — 仅用于导航栏/面板等 chrome */
+  --color-glass-light: rgba(255, 255, 255, 0.92);
+  --color-glass-dark: rgba(28, 28, 30, 0.92);
   /* 背景 */
   --color-ios-bg: #F2F2F7;
   --color-ios-card: #FFFFFF;
   --color-ios-card-dark: #1C1C1E;
   --color-ios-card2-dark: #2C2C2E;
+  /* 卡片边框 */
+  --color-card-border: rgba(0, 0, 0, 0.08);
+  --color-card-border-dark: rgba(255, 255, 255, 0.06);
   /* 分割线 */
   --color-ios-separator: rgba(60, 60, 67, 0.15);
   --color-ios-separator-dark: rgba(84, 84, 88, 0.45);
@@ -60,30 +59,26 @@ body {
 
 #root { width: 100%; min-height: 100vh; }
 
-/* ── 毛玻璃工具类 ─────────────────────────── */
-.glass-thin {
-  background: var(--color-glass-thin);
-  backdrop-filter: blur(30px) saturate(180%);
-  -webkit-backdrop-filter: blur(30px) saturate(180%);
-}
-.glass-regular {
-  background: var(--color-glass-regular);
-  backdrop-filter: blur(35px) saturate(200%);
-  -webkit-backdrop-filter: blur(35px) saturate(200%);
-}
-.glass-thick {
-  background: var(--color-glass-thick);
+/* ── 毛玻璃（仅 chrome 层：导航/面板） ──────── */
+.glass-chrome {
+  background: var(--color-glass-light);
   backdrop-filter: blur(40px) saturate(200%);
   -webkit-backdrop-filter: blur(40px) saturate(200%);
 }
-.dark .glass-thin {
-  background: var(--color-glass-dark-thin);
+.dark .glass-chrome {
+  background: var(--color-glass-dark);
 }
-.dark .glass-regular {
-  background: var(--color-glass-dark-regular);
+
+/* ── 内容卡片（实色 + 边框，层次分明） ──────── */
+.ios-card {
+  background: var(--color-ios-card);
+  border: 0.5px solid var(--color-card-border);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.04);
 }
-.dark .glass-thick {
-  background: var(--color-glass-dark-thick);
+.dark .ios-card {
+  background: var(--color-ios-card-dark);
+  border-color: var(--color-card-border-dark);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.2);
 }
 
 /* ── 自定义滚动条 ─────────────────────────── */

@@ -66,7 +66,7 @@ export function DeviceList({ onSelectDevice }: { onSelectDevice?: (deviceId: str
         <span className="text-[13px] font-medium text-black/40 dark:text-white/40 uppercase tracking-[0.02em]">
           在线设备
         </span>
-        <span className="glass-thin border border-ios-separator dark:border-ios-separator-dark text-[11px] font-medium text-black/40 dark:text-white/40 px-2 py-0.5 rounded-full">
+        <span className="ios-card border border-ios-separator dark:border-ios-separator-dark text-[11px] font-medium text-black/40 dark:text-white/40 px-2 py-0.5 rounded-full">
           {devices.length}
         </span>
         <button
@@ -80,7 +80,7 @@ export function DeviceList({ onSelectDevice }: { onSelectDevice?: (deviceId: str
 
       {devices.length === 0 ? (
         <div className="text-center py-16">
-          <div className="w-[68px] h-[68px] mx-auto mb-4 rounded-[20px] glass-thin border border-white/10 flex items-center justify-center">
+          <div className="w-[68px] h-[68px] mx-auto mb-4 rounded-[20px] ios-card border border-white/10 flex items-center justify-center">
             <Monitor className="w-7 h-7 text-black/15 dark:text-white/15" />
           </div>
           <p className="text-[15px] text-black/60 dark:text-white/60">未发现其他设备</p>
@@ -100,8 +100,8 @@ export function DeviceList({ onSelectDevice }: { onSelectDevice?: (deviceId: str
                 if (dragState.phase === 'dragging') return;
                 onSelectDevice?.(device.device_id);
               }}
-              className={`w-full flex items-center gap-3 p-[15px] rounded-[20px] glass-thin border border-white/15 dark:border-white/5 transition-all duration-300 cursor-pointer
-                active:scale-[0.985] active:bg-glass-regular active:shadow-[0_2px_8px_rgba(0,0,0,0.06)]
+              className={`w-full flex items-center gap-3 p-[15px] rounded-[20px] ios-card border border-white/15 dark:border-white/5 transition-all duration-300 cursor-pointer
+                active:scale-[0.985] active:bg-ios-card active:shadow-[0_2px_8px_rgba(0,0,0,0.06)]
                 ${hoveredDeviceId === device.device_id
                   ? '!border-accent/40 !bg-accent/[0.06] scale-[1.01] drop-target-glow'
                   : dragState.phase === 'dragging' && hoveredDeviceId !== device.device_id
@@ -130,7 +130,7 @@ export function DeviceList({ onSelectDevice }: { onSelectDevice?: (deviceId: str
               </div>
 
               <div className="flex items-center gap-[10px]">
-                <span className="glass-thin border border-ios-separator dark:border-white/5 text-[11px] font-medium text-black/40 dark:text-white/40 px-2 py-0.5 rounded-[7px]">
+                <span className="ios-card border border-ios-separator dark:border-white/5 text-[11px] font-medium text-black/40 dark:text-white/40 px-2 py-0.5 rounded-[7px]">
                   :{device.tcp_port}
                 </span>
                 <button
@@ -148,7 +148,7 @@ export function DeviceList({ onSelectDevice }: { onSelectDevice?: (deviceId: str
       )}
 
       {/* 本机信息 */}
-      <div className="mt-5 p-4 rounded-[20px] glass-thin border border-white/10 dark:border-white/5">
+      <div className="mt-5 p-4 rounded-[20px] ios-card border border-white/10 dark:border-white/5">
         <div className="flex items-center justify-between mb-1.5">
           <span className="text-[11px] font-medium text-black/40 dark:text-white/40 uppercase tracking-[0.05em]">本机</span>
           <span className="text-[11px] font-medium text-ios-green bg-ios-green/10 px-3 py-1 rounded-full border border-ios-green/20">

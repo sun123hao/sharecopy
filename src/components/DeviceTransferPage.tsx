@@ -45,7 +45,7 @@ export function DeviceTransferPage({ onBack }: { onBack: () => void }) {
         <p className="text-[15px] text-black/60 dark:text-white/60 mb-4">设备已离线</p>
         <button
           onClick={onBack}
-          className="flex items-center gap-1.5 px-5 py-2.5 rounded-[10px] glass-thin border border-white/10 text-accent text-[15px] font-medium hover:scale-[0.98] transition-all duration-300"
+          className="flex items-center gap-1.5 px-5 py-2.5 rounded-[10px] glass-chrome border border-white/10 text-accent text-[15px] font-medium hover:scale-[0.98] transition-all duration-300"
         >
           <ArrowLeft className="w-[18px] h-[18px]" />
           返回设备列表
@@ -60,7 +60,7 @@ export function DeviceTransferPage({ onBack }: { onBack: () => void }) {
       <div className="flex items-center gap-3 mb-5">
         <button
           onClick={onBack}
-          className="w-[34px] h-[34px] rounded-[10px] glass-thin border border-white/10 flex items-center justify-center text-accent hover:scale-95 active:scale-90 transition-all duration-200 flex-shrink-0"
+          className="w-[34px] h-[34px] rounded-[10px] glass-chrome border border-white/10 flex items-center justify-center text-accent hover:scale-95 active:scale-90 transition-all duration-200 flex-shrink-0"
         >
           <ArrowLeft className="w-[20px] h-[20px]" />
         </button>

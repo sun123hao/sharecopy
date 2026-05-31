@@ -45,7 +45,7 @@ export function TransferProgressPanel({ deviceId }: { deviceId?: string }) {
           {displayed.map((t) => (
             <div
               key={t.transfer_id}
-              className="flex items-center gap-[10px] p-[11px] rounded-[14px] glass-thin border border-white/10"
+              className="flex items-center gap-[10px] p-[11px] rounded-[14px] ios-card border border-white/10"
             >
               {t.state === 'completed' ? (
                 <CheckCircle2 className="w-[18px] h-[18px] text-ios-green flex-shrink-0" />

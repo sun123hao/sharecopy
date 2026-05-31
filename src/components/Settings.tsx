@@ -83,10 +83,10 @@ export function Settings({ theme, setTheme }: { theme: Theme; setTheme: (t: Them
   };
 
   /* ── iOS 18+ 分组卡片样式 ── */
-  const groupClass = "rounded-[20px] glass-thin border border-white/10 dark:border-white/5 overflow-hidden mb-6 shadow-[0_1px_2px_rgba(0,0,0,0.04)]";
+  const groupClass = "rounded-[20px] ios-card border border-white/10 dark:border-white/5 overflow-hidden mb-6 shadow-[0_1px_2px_rgba(0,0,0,0.04)]";
   const groupHeaderClass = "text-[11px] font-medium text-black/40 dark:text-white/40 uppercase tracking-[0.02em] px-[18px] pt-[14px] pb-[6px]";
   const rowClass = "flex items-center justify-between px-[18px] py-[13px] border-b border-ios-separator dark:border-ios-separator-dark last:border-b-0";
-  const inputClass = "w-full rounded-[10px] glass-thin border border-white/10 dark:border-white/5 px-3 py-2.5 text-[15px] bg-transparent text-black dark:text-white placeholder:text-black/20 dark:placeholder:text-white/20 focus:outline-none focus:border-accent/40 transition-all";
+  const inputClass = "w-full rounded-[10px] ios-card border border-white/10 dark:border-white/5 px-3 py-2.5 text-[15px] bg-transparent text-black dark:text-white placeholder:text-black/20 dark:placeholder:text-white/20 focus:outline-none focus:border-accent/40 transition-all";
 
   return (
     <div>
@@ -126,7 +126,7 @@ export function Settings({ theme, setTheme }: { theme: Theme; setTheme: (t: Them
                     className={`text-[12px] px-3 py-1.5 rounded-[10px] border transition-all duration-200 ${
                       saveDir === dir
                         ? 'bg-accent text-white border-transparent shadow-[0_2px_6px_rgba(0,122,255,0.25)]'
-                        : 'glass-thin border-ios-separator dark:border-white/5 text-black/60 dark:text-white/60'
+                        : 'ios-card border-ios-separator dark:border-white/5 text-black/60 dark:text-white/60'
                     }`}
                   >{dir}</button>
                 ))}
@@ -147,7 +147,7 @@ export function Settings({ theme, setTheme }: { theme: Theme; setTheme: (t: Them
               />
               <button
                 onClick={handleSelectFolder}
-                className="w-10 h-10 rounded-[10px] glass-thin border border-white/10 flex items-center justify-center text-black/30 dark:text-white/30 hover:text-accent transition-colors flex-shrink-0"
+                className="w-10 h-10 rounded-[10px] ios-card border border-white/10 flex items-center justify-center text-black/30 dark:text-white/30 hover:text-accent transition-colors flex-shrink-0"
               ><FolderOpen className="w-[18px] h-[18px]" /></button>
             </div>
           )}
@@ -189,7 +189,7 @@ export function Settings({ theme, setTheme }: { theme: Theme; setTheme: (t: Them
                   className={`flex items-center gap-1.5 px-4 py-2 rounded-[8px] text-[13px] font-medium transition-all duration-200 ${
                     isActive
                       ? 'bg-accent text-white shadow-[0_2px_8px_rgba(0,122,255,0.3)]'
-                      : 'glass-thin border border-white/10 text-black/60 dark:text-white/60 hover:text-black dark:hover:text-white'
+                      : 'ios-card border border-white/10 text-black/60 dark:text-white/60 hover:text-black dark:hover:text-white'
                   }`}
                 ><Icon className="w-[14px] h-[14px]" />{opt.label}</button>
               );
@@ -223,7 +223,7 @@ function StatsSection() {
         { n: stats.images_synced, label: '图片', icon: '􀢷' },
         { n: stats.files_transferred, label: '文件', icon: '􀈓' },
       ].map((s) => (
-        <div key={s.label} className="p-3 rounded-[14px] glass-thin border border-white/10 text-center">
+        <div key={s.label} className="p-3 rounded-[14px] ios-card border border-white/10 text-center">
           <p className="text-[20px] font-semibold">{s.n}</p>
           <p className="text-[11px] text-black/40 dark:text-white/40 mt-0.5">{s.label}</p>
         </div>
