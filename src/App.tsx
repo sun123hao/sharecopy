@@ -65,7 +65,7 @@ function App() {
       style={{ paddingTop: 'var(--safe-area-top)', paddingBottom: 'var(--safe-area-bottom)' }}
     >
       {/* 顶部导航栏 — iOS 毛玻璃 */}
-      <header className="flex items-center justify-between px-4 py-3 glass-chrome border-b border-ios-separator dark:border-ios-separator-dark transition-colors flex-shrink-0">
+      <header className="flex items-center justify-between px-4 py-3 chrome border-b border-ios-separator dark:border-ios-separator-dark transition-colors flex-shrink-0">
         <div className="flex items-center gap-2">
           <div className="w-[30px] h-[30px] rounded-lg bg-gradient-to-br from-accent to-[#5856D6] flex items-center justify-center shadow-[0_2px_8px_rgba(0,122,255,0.35)]">
             <span className="text-white font-bold text-[13px]">S</span>
@@ -92,7 +92,7 @@ function App() {
       {activePage !== 'transfers' && <TransferProgressPanel />}
 
       {/* 底部导航栏 — iOS 毛玻璃 Tab Bar */}
-      <nav className="flex glass-chrome border-t border-ios-separator dark:border-ios-separator-dark px-2 pt-1.5 pb-[22px] gap-1 transition-colors flex-shrink-0">
+      <nav className="flex chrome border-t border-ios-separator dark:border-ios-separator-dark px-2 pt-1.5 pb-[22px] gap-1 transition-colors flex-shrink-0">
         {navItems.map((item) => {
           const isActive = activePage === item.id;
           const Icon = item.icon;

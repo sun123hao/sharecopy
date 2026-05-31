@@ -15,9 +15,9 @@
   --color-ios-orange: #FF9500;
   --color-ios-purple: #AF52DE;
   --color-ios-pink: #FF2D55;
-  /* 毛玻璃 — 仅用于导航栏/面板等 chrome */
-  --color-glass-light: rgba(255, 255, 255, 0.92);
-  --color-glass-dark: rgba(28, 28, 30, 0.92);
+  /* Chrome 背景色 */
+  --color-chrome-light: #F9F9FB;
+  --color-chrome-dark: #1C1C1E;
   /* 背景 */
   --color-ios-bg: #F2F2F7;
   --color-ios-card: #FFFFFF;
@@ -59,17 +59,17 @@ body {
 
 #root { width: 100%; min-height: 100vh; }
 
-/* ── 毛玻璃（仅 chrome 层：导航/面板） ──────── */
-.glass-chrome {
-  background: var(--color-glass-light);
-  backdrop-filter: blur(40px) saturate(200%);
-  -webkit-backdrop-filter: blur(40px) saturate(200%);
+/* ── Chrome 层（导航/面板，纯色无毛玻璃） ──── */
+.chrome {
+  background: var(--color-chrome-light);
+  border-color: var(--color-card-border);
 }
-.dark .glass-chrome {
-  background: var(--color-glass-dark);
+.dark .chrome {
+  background: var(--color-chrome-dark);
+  border-color: var(--color-card-border-dark);
 }
 
-/* ── 内容卡片（实色 + 边框，层次分明） ──────── */
+/* ── 内容卡片 ──────────────────────────── */
 .ios-card {
   background: var(--color-ios-card);
   border: 0.5px solid var(--color-card-border);
