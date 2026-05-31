@@ -23,9 +23,9 @@ android {
         targetSdk = 36
         versionCode = tauriProperties.getProperty("tauri.android.versionCode", "1").toInt()
         versionName = tauriProperties.getProperty("tauri.android.versionName", "1.0")
-        // 仅构建 arm64-v8a，减小 APK 体积（如需 32 位设备，可加 "armeabi-v7a"）
+        // 仅构建 arm64-v8a（覆盖 95%+ 设备），大幅减小 APK 体积
         ndk {
-            abiFilters += listOf("arm64-v8a", "armeabi-v7a")
+            abiFilters += listOf("arm64-v8a")
         }
     }
     buildTypes {
