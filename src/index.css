@@ -3,18 +3,44 @@
 /* class-based 暗色模式（通过 .dark 类切换） */
 @variant dark (&:where(.dark, .dark *));
 
-/* ShareCopy 全局样式 */
-:root {
-  --sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  --mono: ui-monospace, 'SF Mono', Consolas, monospace;
+/* ── iOS 18+ 设计令牌 ────────────────────── */
+@theme {
+  /* 主色 — iOS System Blue */
+  --color-accent: #007AFF;
+  --color-accent-hover: #0056CC;
+  --color-accent-active: #004299;
+  /* 语义色 */
+  --color-ios-green: #34C759;
+  --color-ios-red: #FF3B30;
+  --color-ios-orange: #FF9500;
+  --color-ios-purple: #AF52DE;
+  --color-ios-pink: #FF2D55;
+  /* iOS 18+ 毛玻璃层级 */
+  --color-glass-thin: rgba(255, 255, 255, 0.50);
+  --color-glass-regular: rgba(255, 255, 255, 0.72);
+  --color-glass-thick: rgba(255, 255, 255, 0.90);
+  --color-glass-dark-thin: rgba(30, 30, 32, 0.50);
+  --color-glass-dark-regular: rgba(30, 30, 32, 0.72);
+  --color-glass-dark-thick: rgba(30, 30, 32, 0.90);
+  /* 背景 */
+  --color-ios-bg: #F2F2F7;
+  --color-ios-card: #FFFFFF;
+  --color-ios-card-dark: #1C1C1E;
+  --color-ios-card2-dark: #2C2C2E;
+  /* 分割线 */
+  --color-ios-separator: rgba(60, 60, 67, 0.15);
+  --color-ios-separator-dark: rgba(84, 84, 88, 0.45);
+}
 
+/* ── 全局基础 ────────────────────────────── */
+:root {
+  --sans: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', 'Helvetica Neue', sans-serif;
+  --mono: 'SF Mono', ui-monospace, 'Menlo', monospace;
   font-family: var(--sans);
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-
-  /* 移动端安全区域 */
   --safe-area-top: env(safe-area-inset-top, 0px);
   --safe-area-bottom: env(safe-area-inset-bottom, 0px);
   --safe-area-left: env(safe-area-inset-left, 0px);
@@ -23,77 +49,66 @@
 
 body {
   margin: 0;
-  background: #f8fafc;
-  color: #1e293b;
+  background: var(--color-ios-bg);
+  color: #000;
 }
 
-.dark body,
-body.dark,
-.dark {
-  background: #0f172a;
-  color: #e2e8f0;
+.dark body, body.dark, .dark {
+  background: #000;
+  color: #fff;
 }
 
-#root {
-  width: 100%;
-  min-height: 100vh;
+#root { width: 100%; min-height: 100vh; }
+
+/* ── 毛玻璃工具类 ─────────────────────────── */
+.glass-thin {
+  background: var(--color-glass-thin);
+  backdrop-filter: blur(30px) saturate(180%);
+  -webkit-backdrop-filter: blur(30px) saturate(180%);
+}
+.glass-regular {
+  background: var(--color-glass-regular);
+  backdrop-filter: blur(35px) saturate(200%);
+  -webkit-backdrop-filter: blur(35px) saturate(200%);
+}
+.glass-thick {
+  background: var(--color-glass-thick);
+  backdrop-filter: blur(40px) saturate(200%);
+  -webkit-backdrop-filter: blur(40px) saturate(200%);
+}
+.dark .glass-thin {
+  background: var(--color-glass-dark-thin);
+}
+.dark .glass-regular {
+  background: var(--color-glass-dark-regular);
+}
+.dark .glass-thick {
+  background: var(--color-glass-dark-thick);
 }
 
-/* 自定义滚动条 */
-::-webkit-scrollbar {
-  width: 5px;
-}
-::-webkit-scrollbar-track {
-  background: transparent;
-}
+/* ── 自定义滚动条 ─────────────────────────── */
+::-webkit-scrollbar { width: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb {
-  background: rgba(148, 163, 184, 0.35);
-  border-radius: 3px;
+  background: rgba(60, 60, 67, 0.18);
+  border-radius: 2px;
 }
-::-webkit-scrollbar-thumb:hover {
-  background: rgba(148, 163, 184, 0.55);
-}
-
 .dark ::-webkit-scrollbar-thumb {
-  background: rgba(71, 85, 105, 0.5);
-}
-.dark ::-webkit-scrollbar-thumb:hover {
-  background: rgba(71, 85, 105, 0.7);
+  background: rgba(84, 84, 88, 0.5);
 }
 
-/* 移动端触控优化 */
+/* ── 触控优化 ─────────────────────────────── */
 @media (hover: none) {
-  /* 触控设备上始终显示操作按钮 */
-  .touch-visible {
-    opacity: 1 !important;
-  }
+  .touch-visible { opacity: 1 !important; }
 }
-
-/* 触控设备最小触控区域 */
 @media (pointer: coarse) {
-  .min-touch-target {
-    min-height: 44px;
-    min-width: 44px;
-  }
+  .min-touch-target { min-height: 44px; min-width: 44px; }
 }
 
-/* ── 拖放文件传输相关 ──────────────────── */
-
-/* 拖放悬停时的光晕脉冲 */
+/* ── 拖放光晕动画（iOS 蓝色版） ────────────── */
 @keyframes drop-glow {
-  0%, 100% {
-    box-shadow: 0 0 8px rgba(245, 158, 11, 0.3);
-  }
-  50% {
-    box-shadow: 0 0 16px rgba(245, 158, 11, 0.5);
-  }
+  0%, 100% { box-shadow: 0 0 8px rgba(0, 122, 255, 0.3); }
+  50% { box-shadow: 0 0 20px rgba(0, 122, 255, 0.5); }
 }
-
-.drop-target-glow {
-  animation: drop-glow 1.5s ease-in-out infinite;
-}
-
-/* 拖放进行中时禁止文本选中（防止误选中设备名） */
-.is-dragging * {
-  user-select: none;
-}
+.drop-target-glow { animation: drop-glow 1.5s ease-in-out infinite; }
+.is-dragging * { user-select: none; }

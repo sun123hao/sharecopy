@@ -9,11 +9,11 @@ function deviceInitial(name: string): string {
 
 function deviceColor(name: string): string {
   const colors = [
-    'from-amber-500 to-orange-500',
-    'from-blue-500 to-indigo-500',
-    'from-emerald-500 to-teal-500',
-    'from-violet-500 to-purple-500',
-    'from-rose-500 to-pink-500',
+    'from-accent to-[#5856D6]',
+    'from-ios-green to-[#30B44A]',
+    'from-ios-orange to-[#FF7A00]',
+    'from-ios-purple to-[#8B3FB5]',
+    'from-ios-pink to-[#D91F3F]',
   ];
   let hash = 0;
   for (let i = 0; i < name.length; i++) {
@@ -36,21 +36,18 @@ export function DeviceTransferPage({ onBack }: { onBack: () => void }) {
         const paths = Array.isArray(selected) ? selected : [selected];
         await sendFiles(paths, device.device_id);
       }
-    } catch (e) {
-      console.error('选择文件失败:', e);
-    }
+    } catch (e) { console.error('选择文件失败:', e); }
   };
 
-  // 设备已离线
   if (!device) {
     return (
-      <div className="flex flex-col items-center py-14">
-        <p className="text-sm text-slate-500 dark:text-slate-400 mb-4">设备已离线</p>
+      <div className="flex flex-col items-center py-16">
+        <p className="text-[15px] text-black/60 dark:text-white/60 mb-4">设备已离线</p>
         <button
           onClick={onBack}
-          className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 text-sm hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors"
+          className="flex items-center gap-1.5 px-5 py-2.5 rounded-[10px] glass-thin border border-white/10 text-accent text-[15px] font-medium hover:scale-[0.98] transition-all duration-300"
         >
-          <ArrowLeft className="w-4 h-4" />
+          <ArrowLeft className="w-[18px] h-[18px]" />
           返回设备列表
         </button>
       </div>
@@ -60,45 +57,38 @@ export function DeviceTransferPage({ onBack }: { onBack: () => void }) {
   return (
     <div>
       {/* 设备信息头部 */}
-      <div className="flex items-center gap-3 mb-4">
+      <div className="flex items-center gap-3 mb-5">
         <button
           onClick={onBack}
-          className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors flex-shrink-0"
-          title="返回设备列表"
+          className="w-[34px] h-[34px] rounded-[10px] glass-thin border border-white/10 flex items-center justify-center text-accent hover:scale-95 active:scale-90 transition-all duration-200 flex-shrink-0"
         >
-          <ArrowLeft className="w-5 h-5 text-slate-500 dark:text-slate-400" />
+          <ArrowLeft className="w-[20px] h-[20px]" />
         </button>
 
-        {/* 设备头像 */}
         <div
-          className={`w-9 h-9 rounded-xl bg-gradient-to-br ${deviceColor(device.device_name)} flex items-center justify-center flex-shrink-0`}
+          className={`w-[44px] h-[44px] rounded-[13px] bg-gradient-to-br ${deviceColor(device.device_name)} flex items-center justify-center flex-shrink-0 shadow-[inset_0_1px_0_rgba(255,255,255,0.2)]`}
         >
-          <span className="text-white font-semibold text-sm">
+          <span className="text-white font-semibold text-[18px]">
             {deviceInitial(device.device_name)}
           </span>
         </div>
 
-        {/* 设备信息 */}
         <div className="flex-1 min-w-0">
-          <p className="text-sm font-semibold text-slate-800 dark:text-slate-200 truncate">
-            {device.device_name}
-          </p>
-          <p className="text-[11px] text-slate-400 dark:text-slate-500">
+          <p className="text-[17px] font-semibold truncate">{device.device_name}</p>
+          <p className="text-[13px] text-black/40 dark:text-white/40">
             {device.ip_address} · 端口 {device.tcp_port}
           </p>
         </div>
 
-        {/* 发送文件按钮 */}
         <button
           onClick={handleSendFile}
-          className="p-2 rounded-lg bg-amber-50 dark:bg-amber-500/10 hover:bg-amber-100 dark:hover:bg-amber-500/20 text-amber-500 transition-colors flex-shrink-0"
-          title="发送文件"
+          className="w-[38px] h-[38px] rounded-[11px] bg-accent text-white flex items-center justify-center shadow-[0_2px_8px_rgba(0,122,255,0.35)] hover:scale-95 active:scale-90 transition-all duration-200 flex-shrink-0"
         >
-          <SendHorizonal className="w-4 h-4" />
+          <SendHorizonal className="w-[18px] h-[18px]" />
         </button>
       </div>
 
-      {/* 传输进度（仅该设备） */}
+      {/* 传输记录 */}
       <TransferProgressPanel deviceId={selectedDeviceId ?? undefined} />
     </div>
   );

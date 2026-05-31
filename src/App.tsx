@@ -29,7 +29,6 @@ function applyTheme(theme: Theme) {
   } else if (theme === 'light') {
     root.classList.remove('dark');
   } else {
-    // system
     const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
     root.classList.toggle('dark', prefersDark);
   }
@@ -46,16 +45,10 @@ function App() {
     applyTheme(t);
   };
 
-  // 监听系统主题变化
-  // 注：初始主题已在 index.html 同步脚本中应用（避免闪烁），此处 applyTheme
-  // 作为安全网：若内联脚本因 CSP/扩展等原因未执行，挂载时仍能恢复正确主题
   useEffect(() => {
     applyTheme(getStoredTheme());
-
     const mq = window.matchMedia('(prefers-color-scheme: dark)');
-    const handler = () => {
-      if (getStoredTheme() === 'system') applyTheme('system');
-    };
+    const handler = () => { if (getStoredTheme() === 'system') applyTheme('system'); };
     mq.addEventListener('change', handler);
     return () => mq.removeEventListener('change', handler);
   }, []);
@@ -68,28 +61,24 @@ function App() {
 
   return (
     <div
-      className="flex flex-col h-screen bg-slate-50 dark:bg-slate-950 text-slate-800 dark:text-slate-200 transition-colors"
+      className="flex flex-col h-screen bg-ios-bg dark:bg-black text-black dark:text-white transition-colors"
       style={{ paddingTop: 'var(--safe-area-top)', paddingBottom: 'var(--safe-area-bottom)' }}
     >
-      {/* 顶部标题栏 */}
-      <header className="flex items-center justify-between px-4 py-3 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 transition-colors">
+      {/* 顶部导航栏 — iOS 毛玻璃 */}
+      <header className="flex items-center justify-between px-4 py-3 glass-thick border-b border-ios-separator dark:border-ios-separator-dark transition-colors flex-shrink-0">
         <div className="flex items-center gap-2">
-          <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-amber-500 to-orange-500 flex items-center justify-center">
-            <span className="text-white font-bold text-xs">S</span>
+          <div className="w-[30px] h-[30px] rounded-lg bg-gradient-to-br from-accent to-[#5856D6] flex items-center justify-center shadow-[0_2px_8px_rgba(0,122,255,0.35)]">
+            <span className="text-white font-bold text-[13px]">S</span>
           </div>
-          <h1 className="text-base font-semibold text-slate-800 dark:text-slate-200">ShareCopy</h1>
+          <h1 className="text-[17px] font-semibold">ShareCopy</h1>
         </div>
-        <span className="text-[11px] text-slate-400 dark:text-slate-500">v0.1.0</span>
       </header>
 
       {/* 主内容区 */}
       <main className="flex-1 overflow-y-auto p-4">
         {activePage === 'devices' && (
           <DeviceList
-            onSelectDevice={(deviceId) => {
-              selectDevice(deviceId);
-              setActivePage('transfers');
-            }}
+            onSelectDevice={(deviceId) => { selectDevice(deviceId); setActivePage('transfers'); }}
           />
         )}
         {activePage === 'settings' && <SettingsPage theme={theme} setTheme={setTheme} />}
@@ -99,11 +88,11 @@ function App() {
         )}
       </main>
 
-      {/* 全局传输进度（仅在非设备详情页显示） */}
+      {/* 全局传输进度 — 仅在非设备详情页显示 */}
       {activePage !== 'transfers' && <TransferProgressPanel />}
 
-      {/* 底部导航 */}
-      <nav className="flex bg-white dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800 px-2 py-1 gap-1 transition-colors">
+      {/* 底部导航栏 — iOS 毛玻璃 Tab Bar */}
+      <nav className="flex glass-thick border-t border-ios-separator dark:border-ios-separator-dark px-2 pt-1.5 pb-[22px] gap-1 transition-colors flex-shrink-0">
         {navItems.map((item) => {
           const isActive = activePage === item.id;
           const Icon = item.icon;
@@ -111,13 +100,13 @@ function App() {
             <button
               key={item.id}
               onClick={() => { setActivePage(item.id); selectDevice(null); }}
-              className={`flex-1 flex flex-col items-center py-1.5 rounded-lg text-[11px] transition-colors ${
+              className={`flex-1 flex flex-col items-center py-1 rounded-[10px] text-[10px] font-medium transition-all duration-300 ${
                 isActive
-                  ? 'text-amber-500 bg-amber-50 dark:bg-amber-500/10'
-                  : 'text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-300'
+                  ? 'text-accent'
+                  : 'text-black/30 dark:text-white/30'
               }`}
             >
-              <Icon className={`w-[18px] h-[18px] mb-0.5 ${isActive ? 'stroke-amber-500' : ''}`} />
+              <Icon className={`w-[24px] h-[24px] mb-0.5 ${isActive ? '' : ''}`} />
               {item.label}
             </button>
           );
