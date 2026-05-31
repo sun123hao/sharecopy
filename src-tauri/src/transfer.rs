@@ -9,7 +9,7 @@ use crate::protocol::{
     FileDataChunkPayload, FileTransferReqPayload, Message,
 };
 
-pub const CHUNK_SIZE: usize = 64 * 1024; // 64KB
+pub const CHUNK_SIZE: usize = 256 * 1024; // 256KB
 
 // ── 传输进度 ──────────────────────────────
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]

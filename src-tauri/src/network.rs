@@ -287,13 +287,15 @@ impl NetworkManager {
                         let write_handle = {
                             let remote_id = remote_device_id.clone();
                             tokio::spawn(async move {
-                                // 批量写入：排空通道中所有可用数据，单次 write_all 最小化 syscall
+                                // 批量写入：合并通道数据，单次 write_all 减少 syscall
                                 loop {
                                     let Some(mut batch) = send_rx.recv().await else { break };
-                                    // 尽力排空通道（不限数量），文件传输时大幅减少 write 次数
+                                    // 最多合并 32 块（32 × 256KB = 8MB），防止 write_all 超时断连
+                                    let mut count = 1;
                                     loop {
+                                        if count >= 32 { break; }
                                         match send_rx.try_recv() {
-                                            Ok(data) => batch.extend_from_slice(&data),
+                                            Ok(data) => { batch.extend_from_slice(&data); count += 1; }
                                             Err(_) => break,
                                         }
                                     }
