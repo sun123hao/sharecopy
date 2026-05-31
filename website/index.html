@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ShareCopy — 跨设备局域网共享工具</title>
+  <meta name="description" content="在同一局域网内，实时同步剪贴板、快速传输文件。无需联网、无需注册、无需服务器。">
+  <link rel="icon" type="image/png" href="assets/hero.png">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <!-- 导航栏 -->
+  <nav class="nav" id="nav">
+    <div class="nav-inner">
+      <a href="#" class="nav-logo">ShareCopy</a>
+      <a href="https://github.com/sun123hao/sharecopy/releases" class="nav-download-btn">免费下载</a>
+    </div>
+  </nav>
+
+  <!-- Hero -->
+  <section class="hero">
+    <div class="hero-content">
+      <h1 class="hero-title">
+        <span class="hero-title-line">跨设备</span>
+        <span class="hero-title-line gradient-text">无缝共享</span>
+      </h1>
+      <p class="hero-subtitle">
+        在同一局域网内，实时同步剪贴板、快速传输文件。<br>无需联网、无需注册、无需服务器。
+      </p>
+      <a href="https://github.com/sun123hao/sharecopy/releases" class="cta-btn">
+        免费下载
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+      </a>
+      <div class="hero-mockup">
+        <img src="assets/hero.png" alt="ShareCopy 界面" class="hero-image">
+      </div>
+    </div>
+  </section>
+
+  <!-- 核心功能 -->
+  <section class="features" id="features">
+    <div class="section-header reveal">
+      <h2 class="section-title">核心功能</h2>
+    </div>
+    <div class="features-grid">
+      <div class="feature-card reveal">
+        <div class="feature-icon">📋</div>
+        <h3 class="feature-title">剪贴板实时同步</h3>
+        <p class="feature-desc">文字、图片自动同步到局域网内所有设备，复制即共享，双向实时。</p>
+      </div>
+      <div class="feature-card reveal">
+        <div class="feature-icon">📁</div>
+        <h3 class="feature-title">点对点文件传输</h3>
+        <p class="feature-desc">点击发送或拖放文件到设备卡片，SHA256 校验确保完整性，支持大文件。</p>
+      </div>
+      <div class="feature-card reveal">
+        <div class="feature-icon">🔍</div>
+        <h3 class="feature-title">自动设备发现</h3>
+        <p class="feature-desc">基于 mDNS (Bonjour) 自动发现局域网内设备，无需手动配置 IP 地址。</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 支持平台 -->
+  <section class="platforms" id="platforms">
+    <div class="section-header reveal">
+      <h2 class="section-title">支持平台</h2>
+    </div>
+    <div class="platforms-grid">
+      <div class="platform-card reveal">
+        <div class="platform-icon">🖥</div>
+        <h3 class="platform-name">macOS</h3>
+        <p class="platform-detail">Apple Silicon &amp; Intel</p>
+        <a href="https://github.com/sun123hao/sharecopy/releases" class="platform-dl">下载 .dmg</a>
+      </div>
+      <div class="platform-card reveal">
+        <div class="platform-icon">🪟</div>
+        <h3 class="platform-name">Windows</h3>
+        <p class="platform-detail">Windows 10 / 11</p>
+        <a href="https://github.com/sun123hao/sharecopy/releases" class="platform-dl">下载 .msi</a>
+      </div>
+      <div class="platform-card reveal">
+        <div class="platform-icon">📱</div>
+        <h3 class="platform-name">Android</h3>
+        <p class="platform-detail">Android 8.0+</p>
+        <a href="https://github.com/sun123hao/sharecopy/releases" class="platform-dl">下载 .apk</a>
+      </div>
+    </div>
+  </section>
+
+  <!-- 三步开始 -->
+  <section class="steps" id="steps">
+    <div class="section-header reveal">
+      <h2 class="section-title">三步开始</h2>
+    </div>
+    <div class="steps-list">
+      <div class="step-item reveal">
+        <div class="step-number">1</div>
+        <h3 class="step-title">安装 ShareCopy</h3>
+        <p class="step-desc">在你的 Mac、Windows 或 Android 设备上下载并安装。</p>
+      </div>
+      <div class="step-divider"></div>
+      <div class="step-item reveal">
+        <div class="step-number">2</div>
+        <h3 class="step-title">同一网络自动发现</h3>
+        <p class="step-desc">连接到同一个 WiFi，设备之间自动发现，无需手动配对。</p>
+      </div>
+      <div class="step-divider"></div>
+      <div class="step-item reveal">
+        <div class="step-number">3</div>
+        <h3 class="step-title">开始共享</h3>
+        <p class="step-desc">复制文字或拖放文件，即刻同步到其他设备，就这么简单。</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- Footer -->
+  <footer class="footer">
+    <div class="footer-inner">
+      <a href="https://github.com/sun123hao/sharecopy" class="footer-github" target="_blank" rel="noopener">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
+        GitHub
+      </a>
+      <p class="footer-copy">&copy; 2025 ShareCopy</p>
+    </div>
+  </footer>
+
+  <script src="script.js"></script>
+</body>
+</html>
