@@ -36,6 +36,7 @@ export interface TransferProgress {
   file_name: string;
   progress: number; // 0-100
   state: TransferState;
+  device_id?: string; // 关联的设备 ID（发送端=目标设备，接收端=来源设备）
 }
 
 // ── 剪贴板历史条目 ────────────────────

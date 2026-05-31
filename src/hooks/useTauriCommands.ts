@@ -60,3 +60,8 @@ export async function getAndroidSaveDirs(): Promise<string[]> {
 export async function refreshDiscovery(): Promise<void> {
   return invoke('refresh_discovery');
 }
+
+// ── 取消传输 ───────────────────────────
+export async function cancelTransfer(transferId: string): Promise<void> {
+  return invoke('cancel_transfer', { transferId });
+}

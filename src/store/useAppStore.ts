@@ -13,6 +13,8 @@ interface AppState {
   stats: SyncStats;
   // 传输进度列表
   transfers: TransferProgress[];
+  // 当前选中的设备 ID（用于设备详情页）
+  selectedDeviceId: string | null;
 
   // Actions
   loadConfig: () => Promise<void>;
@@ -24,6 +26,8 @@ interface AppState {
   addDevice: (device: DiscoveredDevice) => void;
   removeDevice: (deviceId: string) => void;
   updateTransferProgress: (p: TransferProgress) => void;
+  removeTransfer: (transferId: string) => void;
+  selectDevice: (deviceId: string | null) => void;
   refreshStats: () => Promise<void>;
 }
 
@@ -33,6 +37,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   syncEnabled: true,
   stats: { texts_synced: 0, images_synced: 0, files_transferred: 0 },
   transfers: [],
+  selectedDeviceId: null,
 
   loadConfig: async () => {
     try {
@@ -117,6 +122,10 @@ export const useAppStore = create<AppState>((set, get) => ({
   removeDevice: (deviceId: string) => {
     set((state) => ({
       devices: state.devices.filter((d) => d.device_id !== deviceId),
+      // 设备断开时清理该设备的进行中传输（已完成/失败的保留）
+      transfers: state.transfers.filter(
+        (t) => t.device_id !== deviceId || (t.state !== 'transferring' && t.state !== 'pending')
+      ),
     }));
   },
 
@@ -130,6 +139,16 @@ export const useAppStore = create<AppState>((set, get) => ({
       }
       return { transfers: [...state.transfers, p] };
     });
+  },
+
+  removeTransfer: (transferId: string) => {
+    set((state) => ({
+      transfers: state.transfers.filter((t) => t.transfer_id !== transferId),
+    }));
+  },
+
+  selectDevice: (deviceId: string | null) => {
+    set({ selectedDeviceId: deviceId });
   },
 
   refreshStats: async () => {

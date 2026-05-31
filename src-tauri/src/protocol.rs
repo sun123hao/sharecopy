@@ -22,6 +22,7 @@ pub enum MessageType {
     ClipboardImageChunk = 0x0008,
     Ack = 0x0009,
     Error = 0x000A,
+    TransferCancel = 0x000B,
 }
 
 impl MessageType {
@@ -37,6 +38,7 @@ impl MessageType {
             0x0008 => Some(Self::ClipboardImageChunk),
             0x0009 => Some(Self::Ack),
             0x000A => Some(Self::Error),
+            0x000B => Some(Self::TransferCancel),
             _ => None,
         }
     }
@@ -55,6 +57,7 @@ pub enum Message {
     ClipboardImageChunk(ClipboardImageChunkPayload),
     Ack(AckPayload),
     Error(ErrorPayload),
+    TransferCancel(TransferCancelPayload),
 }
 
 // ── 各消息体定义 ─────────────────────────────
@@ -141,6 +144,11 @@ pub struct ErrorPayload {
     pub message: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TransferCancelPayload {
+    pub transfer_id: String,
+}
+
 // ── 编码接口 ──────────────────────────────
 impl Message {
     /// 获取消息类型
@@ -156,6 +164,7 @@ impl Message {
             Message::ClipboardImageChunk(_) => MessageType::ClipboardImageChunk,
             Message::Ack(_) => MessageType::Ack,
             Message::Error(_) => MessageType::Error,
+            Message::TransferCancel(_) => MessageType::TransferCancel,
         }
     }
 

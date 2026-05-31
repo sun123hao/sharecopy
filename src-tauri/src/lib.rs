@@ -138,6 +138,18 @@ async fn refresh_discovery(state: tauri::State<'_, AppState>) -> Result<(), Stri
     Ok(())
 }
 
+/// 取消正在进行的文件传输
+#[tauri::command]
+async fn cancel_transfer(
+    state: tauri::State<'_, AppState>,
+    transfer_id: String,
+) -> Result<(), String> {
+    state
+        .transfer_manager
+        .cancel_transfer(&transfer_id)
+        .map_err(|e| e.to_string())
+}
+
 /// 获取可用的保存目录路径（Android 返回真实目录，桌面端返回空）
 #[tauri::command]
 async fn get_android_save_dirs() -> Result<Vec<String>, String> {
@@ -465,6 +477,7 @@ pub fn run() {
             is_sync_enabled,
             get_android_save_dirs,
             refresh_discovery,
+            cancel_transfer,
         ])
         .build(tauri::generate_context!())
         .expect("ShareCopy 启动失败")

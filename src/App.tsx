@@ -4,8 +4,10 @@ import { DeviceList } from './components/DeviceList';
 import { Settings as SettingsPage } from './components/Settings';
 import { ClipboardHistory } from './components/ClipboardHistory';
 import { TransferProgressPanel } from './components/TransferProgress';
+import { DeviceTransferPage } from './components/DeviceTransferPage';
+import { useAppStore } from './store/useAppStore';
 
-type Page = 'devices' | 'settings' | 'history';
+type Page = 'devices' | 'settings' | 'history' | 'transfers';
 type Theme = 'system' | 'light' | 'dark';
 
 // 注意：此 key 和 applyTheme 逻辑与 index.html 内联脚本重复，
@@ -36,6 +38,7 @@ function applyTheme(theme: Theme) {
 function App() {
   const [activePage, setActivePage] = useState<Page>('devices');
   const [theme, setThemeState] = useState<Theme>(getStoredTheme);
+  const selectDevice = useAppStore((s) => s.selectDevice);
 
   const setTheme = (t: Theme) => {
     setThemeState(t);
@@ -81,13 +84,23 @@ function App() {
 
       {/* 主内容区 */}
       <main className="flex-1 overflow-y-auto p-4">
-        {activePage === 'devices' && <DeviceList />}
+        {activePage === 'devices' && (
+          <DeviceList
+            onSelectDevice={(deviceId) => {
+              selectDevice(deviceId);
+              setActivePage('transfers');
+            }}
+          />
+        )}
         {activePage === 'settings' && <SettingsPage theme={theme} setTheme={setTheme} />}
         {activePage === 'history' && <ClipboardHistory />}
+        {activePage === 'transfers' && (
+          <DeviceTransferPage onBack={() => { setActivePage('devices'); selectDevice(null); }} />
+        )}
       </main>
 
-      {/* 传输进度 */}
-      <TransferProgressPanel />
+      {/* 全局传输进度（仅在非设备详情页显示） */}
+      {activePage !== 'transfers' && <TransferProgressPanel />}
 
       {/* 底部导航 */}
       <nav className="flex bg-white dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800 px-2 py-1 gap-1 transition-colors">
@@ -97,7 +110,7 @@ function App() {
           return (
             <button
               key={item.id}
-              onClick={() => setActivePage(item.id)}
+              onClick={() => { setActivePage(item.id); selectDevice(null); }}
               className={`flex-1 flex flex-col items-center py-1.5 rounded-lg text-[11px] transition-colors ${
                 isActive
                   ? 'text-amber-500 bg-amber-50 dark:bg-amber-500/10'

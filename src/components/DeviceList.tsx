@@ -25,7 +25,7 @@ function deviceColor(name: string): string {
   return colors[Math.abs(hash) % colors.length];
 }
 
-export function DeviceList() {
+export function DeviceList({ onSelectDevice }: { onSelectDevice?: (deviceId: string) => void }) {
   const devices = useAppStore((s) => s.devices);
   const config = useAppStore((s) => s.config);
   const addDevice = useAppStore((s) => s.addDevice);
@@ -101,7 +101,14 @@ export function DeviceList() {
             <div
               key={device.device_id}
               data-drop-device={device.device_id}
-              className={`w-full flex items-center gap-3 p-3 rounded-xl bg-white dark:bg-slate-800 shadow-sm transition-all duration-200${
+              role="button"
+              tabIndex={0}
+              onClick={() => {
+                // 拖放过程中不触发点击
+                if (dragState.phase === 'dragging') return;
+                onSelectDevice?.(device.device_id);
+              }}
+              className={`w-full flex items-center gap-3 p-3 rounded-xl bg-white dark:bg-slate-800 shadow-sm transition-all duration-200 cursor-pointer${
                 dragState.phase === 'dragging'
                   ? ' border-2 border-dashed border-amber-300/60 dark:border-amber-500/40 cursor-copy'
                   : ' border border-slate-200 dark:border-slate-700 hover:shadow-md hover:border-slate-300 dark:hover:border-slate-600'
@@ -141,7 +148,7 @@ export function DeviceList() {
                 </span>
                 {/* 发送文件按钮 */}
                 <button
-                  onClick={() => handleSendFile(device.device_id)}
+                  onClick={(e) => { e.stopPropagation(); handleSendFile(device.device_id); }}
                   className="p-1.5 rounded-lg hover:bg-amber-50 dark:hover:bg-amber-500/10 transition-colors"
                   title="发送文件"
                 >

@@ -374,12 +374,15 @@ impl SyncEngine {
                     self.handle_image_chunk(payload);
                 }
                 Message::FileTransferReq(payload) => {
-                    self.transfer.handle_file_request(&payload);
+                    self.transfer.handle_file_request(&payload, src_id);
                 }
                 Message::FileDataChunk(payload) => {
                     if let Err(e) = self.transfer.handle_file_chunk(&payload) {
                         tracing::error!("文件数据块处理失败: {}", e);
                     }
+                }
+                Message::TransferCancel(payload) => {
+                    self.transfer.handle_transfer_cancel(&payload.transfer_id);
                 }
                 _ => {}
             },
