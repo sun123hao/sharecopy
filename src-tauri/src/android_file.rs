@@ -282,7 +282,10 @@ fn get_app_context<'a>(env: &mut jni::JNIEnv<'a>) -> AppResult<JObject<'a>> {
     Ok(app)
 }
 
-/// 获取 Android 默认保存目录（优先公共下载目录，简洁易找）
+/// 获取 Android 默认保存目录
+///
+/// Android 10+ 分区存储下，直接文件路径写入公共目录（如 Downloads）会被拒绝。
+/// 因此优先使用应用外部文件目录（不受分区存储限制），仅作备选时才尝试公共目录。
 #[cfg(target_os = "android")]
 pub fn get_default_save_dir() -> AppResult<std::path::PathBuf> {
     let jvm = get_jvm()?;
@@ -290,76 +293,81 @@ pub fn get_default_save_dir() -> AppResult<std::path::PathBuf> {
         crate::error::AppError::Transfer(format!("JNI attach: {}", e))
     })?;
 
-    // 优先使用公共 Downloads 目录（路径短：/storage/emulated/0/Download）
-    let env_cls = env.find_class("android/os/Environment").map_err(|e| {
-        crate::error::AppError::Transfer(format!("Environment: {}", e))
-    })?;
-    let downloads = env
-        .get_static_field(&env_cls, "DIRECTORY_DOWNLOADS", "Ljava/lang/String;")
-        .and_then(|v| v.l())
-        .map_err(|e| {
-            crate::error::AppError::Transfer(format!("DIRECTORY_DOWNLOADS: {}", e))
-        })?;
-    let public_dir = env
-        .call_static_method(
-            &env_cls,
-            "getExternalStoragePublicDirectory",
+    let context = get_app_context(&mut env)?;
+
+    // 优先使用应用外部文件目录（始终可写，不受分区存储限制）
+    // 路径类似：/storage/emulated/0/Android/data/com.sharecopy.app/files
+    let ext_files = env
+        .call_method(
+            &context,
+            "getExternalFilesDir",
             "(Ljava/lang/String;)Ljava/io/File;",
-            &[JValue::Object(&downloads)],
+            &[JValue::Object(&JObject::null())],
         )
         .and_then(|v| v.l())
-        .map_err(|e| {
-            crate::error::AppError::Transfer(format!("getExternalStoragePublicDirectory: {}", e))
-        })?;
+        .ok();
 
-    if !public_dir.is_null() {
-        let abs = env
-            .call_method(&public_dir, "getAbsolutePath", "()Ljava/lang/String;", &[])
-            .and_then(|v| v.l())
-            .ok();
-        if let Some(abs) = abs {
-            if !abs.is_null() {
-                let path: String = unsafe {
-                    let js = jni::objects::JString::from_raw(abs.into_raw());
-                    env.get_string(&js).map(|s| s.into()).unwrap_or_default()
-                };
-                if !path.is_empty() {
-                    return Ok(std::path::PathBuf::from(path));
+    if let Some(ext_files) = ext_files {
+        if !ext_files.is_null() {
+            let abs = env
+                .call_method(&ext_files, "getAbsolutePath", "()Ljava/lang/String;", &[])
+                .and_then(|v| v.l())
+                .ok();
+            if let Some(abs) = abs {
+                if !abs.is_null() {
+                    let path: String = unsafe {
+                        let js = jni::objects::JString::from_raw(abs.into_raw());
+                        env.get_string(&js).map(|s| s.into()).unwrap_or_default()
+                    };
+                    if !path.is_empty() {
+                        tracing::info!("Android 保存目录（应用外部文件）: {}", path);
+                        return Ok(std::path::PathBuf::from(path));
+                    }
                 }
             }
         }
     }
 
-    // 回退：应用外部文件目录
-    let context = get_app_context(&mut env)?;
-    let ext_files = env
-        .call_method(&context, "getExternalFilesDir", "(Ljava/lang/String;)Ljava/io/File;", &[
-            JValue::Object(&JObject::null()),
-        ])
-        .and_then(|v| v.l())
-        .map_err(|e| {
-            crate::error::AppError::Transfer(format!("getExternalFilesDir: {}", e))
-        })?;
-
-    if ext_files.is_null() {
-        return Err(crate::error::AppError::Transfer("外部文件目录为空".into()));
+    // 备选：尝试公共 Downloads 目录（Android 9 及以下可用）
+    if let Ok(env_cls) = env.find_class("android/os/Environment") {
+        if let Ok(downloads) = env
+            .get_static_field(&env_cls, "DIRECTORY_DOWNLOADS", "Ljava/lang/String;")
+            .and_then(|v| v.l())
+        {
+            if let Ok(public_dir) = env
+                .call_static_method(
+                    &env_cls,
+                    "getExternalStoragePublicDirectory",
+                    "(Ljava/lang/String;)Ljava/io/File;",
+                    &[JValue::Object(&downloads)],
+                )
+                .and_then(|v| v.l())
+            {
+                if !public_dir.is_null() {
+                    let abs = env
+                        .call_method(&public_dir, "getAbsolutePath", "()Ljava/lang/String;", &[])
+                        .and_then(|v| v.l())
+                        .ok();
+                    if let Some(abs) = abs {
+                        if !abs.is_null() {
+                            let path: String = unsafe {
+                                let js = jni::objects::JString::from_raw(abs.into_raw());
+                                env.get_string(&js).map(|s| s.into()).unwrap_or_default()
+                            };
+                            if !path.is_empty() {
+                                tracing::info!("Android 保存目录（公共下载）: {}", path);
+                                return Ok(std::path::PathBuf::from(path));
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 
-    let abs = env
-        .call_method(&ext_files, "getAbsolutePath", "()Ljava/lang/String;", &[])
-        .and_then(|v| v.l())
-        .map_err(|e| {
-            crate::error::AppError::Transfer(format!("getAbsolutePath: {}", e))
-        })?;
-
-    let path: String = unsafe {
-        let js = jni::objects::JString::from_raw(abs.into_raw());
-        env.get_string(&js).map(|s| s.into()).map_err(|e| {
-            crate::error::AppError::Transfer(format!("get_string: {}", e))
-        })?
-    };
-
-    Ok(std::path::PathBuf::from(path))
+    Err(crate::error::AppError::Transfer(
+        "无法获取任何可写入的保存目录".into(),
+    ))
 }
 
 /// 获取 Android 可用的保存目录列表
