@@ -11,7 +11,7 @@ export function TransferProgressPanel({ deviceId }: { deviceId?: string }) {
   const transfers = deviceId
     ? allTransfers.filter((t) => t.device_id === deviceId)
     : allTransfers;
-  const displayed = deviceId ? transfers : transfers.slice(-3);
+  const displayed = deviceId ? transfers : transfers.slice(-1);
 
   useTransferProgress((p) => {
     updateTransferProgress({
