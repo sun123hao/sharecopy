@@ -136,7 +136,8 @@ impl FileTransferManager {
                     let start = i as usize * CHUNK_SIZE;
                     let end = std::cmp::min(start + CHUNK_SIZE, file_data.len());
                     let chunk = &file_data[start..end];
-                    let chunk_sha256 = hex::encode(Sha256::digest(chunk));
+                    // 逐块 SHA256 不计算（最终文件 SHA256 足够），发送空 hash 走快速路径
+                    let chunk_sha256 = String::new();
                     let msg = Message::FileDataChunk(FileDataChunkPayload {
                         transfer_id: tid_for_encode.clone(),
                         chunk_index: i,
@@ -230,20 +231,22 @@ impl FileTransferManager {
 
     /// 处理文件数据块
     pub fn handle_file_chunk(&self, payload: &FileDataChunkPayload) -> AppResult<()> {
-        use sha2::{Digest, Sha256};
-
         let mut incoming = self.incoming.lock();
         let transfer = incoming
             .get_mut(&payload.transfer_id)
             .ok_or_else(|| AppError::Transfer("未知传输会话".into()))?;
 
-        // 校验块 SHA256
-        let chunk_hash = hex::encode(Sha256::digest(&payload.data));
-        if chunk_hash != payload.sha256_chunk {
-            return Err(AppError::ChecksumMismatch {
-                expected: payload.sha256_chunk.clone(),
-                actual: chunk_hash,
-            });
+        // 逐块 SHA256 已跳过（TCP 层保证完整性，最终文件 SHA256 做端到端校验）
+        // 仅在发送方提供了非空 hash 时才验证（兼容旧版本）
+        if !payload.sha256_chunk.is_empty() {
+            use sha2::{Digest, Sha256};
+            let chunk_hash = hex::encode(Sha256::digest(&payload.data));
+            if chunk_hash != payload.sha256_chunk {
+                return Err(AppError::ChecksumMismatch {
+                    expected: payload.sha256_chunk.clone(),
+                    actual: chunk_hash,
+                });
+            }
         }
 
         transfer
@@ -275,6 +278,7 @@ impl FileTransferManager {
             let file_name = transfer.file_name.clone();
 
             tokio::spawn(async move {
+                use sha2::{Digest, Sha256};
                 // 组装文件
                 let mut data: Vec<u8> = Vec::with_capacity(transfer.file_size as usize);
                 for i in 0..transfer.total_chunks {
