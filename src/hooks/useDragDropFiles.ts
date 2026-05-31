@@ -77,10 +77,13 @@ export function useDragDropFiles() {
       titleBarHeight.current = 32; // Windows 标题栏
     } else if (platform.includes('Mac')) {
       titleBarHeight.current = 28; // macOS 标题栏
+    } else if (platform.includes('Linux')) {
+      titleBarHeight.current = 30; // Linux (GNOME/KDE) 标题栏
     } else {
-      titleBarHeight.current = 0;  // Linux / 无标题栏
+      titleBarHeight.current = 0;
     }
 
+    let cancelled = false;
     let unlisten: (() => void) | undefined;
 
     const setup = async () => {
@@ -140,15 +143,19 @@ export function useDragDropFiles() {
           }
         }
       });
-      unlisten = cleanup;
+      if (cancelled) {
+        // 组件已在 await 期间卸载，立即清理刚注册的监听器
+        cleanup();
+      } else {
+        unlisten = cleanup;
+      }
     };
 
     setup();
 
     return () => {
-      // 清理事件监听
+      cancelled = true;
       if (unlisten) unlisten();
-      // 确保移除拖放状态类
       document.body.classList.remove('is-dragging');
     };
   }, [toCssPosition, findDeviceAtPoint, updateHoveredDevice, resetDrag]);
