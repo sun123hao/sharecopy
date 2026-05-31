@@ -120,7 +120,7 @@ impl FileTransferManager {
             save_path: None,
         });
 
-        // 流式分块发送：编一块发一块，立即开始传输，无需等全部编码完成
+        // 全量编码一次推送：消除逐块 channel 开销
         let network = self.network.clone();
         let progress_tx = self.progress_tx.clone();
         let tid = transfer_id.clone();
@@ -128,42 +128,31 @@ impl FileTransferManager {
         let target_id = target_device_id.to_string();
 
         tokio::spawn(async move {
+            // 预分配：文件大小 + 每块 TLV 头 11 字节 + bincode 少量结构开销
+            let est_size = file_size as usize + total_chunks as usize * 128;
+            let mut bulk = Vec::with_capacity(est_size);
+
             for i in 0..total_chunks {
                 let start = i as usize * CHUNK_SIZE;
                 let end = std::cmp::min(start + CHUNK_SIZE, file_data.len());
-                let chunk = file_data[start..end].to_vec();
 
                 let msg = Message::FileDataChunk(FileDataChunkPayload {
                     transfer_id: tid.clone(),
                     chunk_index: i,
                     total_chunks,
-                    data: chunk,
+                    data: file_data[start..end].to_vec(),
                     sha256_chunk: String::new(),
                 });
 
                 match msg.encode() {
-                    Ok(encoded) => {
-                        if let Err(e) = network.send_raw(&target_id, encoded) {
-                            tracing::error!("发送文件块 {} 失败: {}", i, e);
-                            let _ = progress_tx.send(TransferProgress {
-                                transfer_id: tid.clone(),
-                                file_name: fname.clone(),
-                                file_size,
-                                bytes_transferred: end as u64,
-                                progress: end as f64 / file_size as f64,
-                                state: TransferState::Failed,
-                                error: Some(format!("发送失败: {}", e)),
-                                save_path: None,
-                            });
-                            return;
-                        }
-                    }
+                    Ok(encoded) => bulk.extend_from_slice(&encoded),
                     Err(e) => {
                         tracing::error!("编码块 {} 失败: {}", i, e);
                         return;
                     }
                 }
 
+                // 仍然按块发送进度（进度通道独立，不影响主发送管道）
                 let progress = end as f64 / file_size as f64;
                 let _ = progress_tx.send(TransferProgress {
                     transfer_id: tid.clone(),
@@ -177,6 +166,21 @@ impl FileTransferManager {
                         TransferState::Transferring
                     },
                     error: None,
+                    save_path: None,
+                });
+            }
+
+            // 一次推送全部数据到 TCP 通道
+            if let Err(e) = network.send_raw(&target_id, bulk) {
+                tracing::error!("发送文件失败: {}", e);
+                let _ = progress_tx.send(TransferProgress {
+                    transfer_id: tid.clone(),
+                    file_name: fname.clone(),
+                    file_size,
+                    bytes_transferred: file_size,
+                    progress: 1.0,
+                    state: TransferState::Failed,
+                    error: Some(format!("发送失败: {}", e)),
                     save_path: None,
                 });
             }
