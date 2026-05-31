@@ -420,3 +420,32 @@ img {
     margin: 0 auto;
   }
 }
+
+/* ========================================
+   响应式：平板
+   ======================================== */
+@media (max-width: 768px) {
+  .hero {
+    padding: 100px 20px 60px;
+  }
+
+  .hero-mockup {
+    margin-top: 48px;
+  }
+
+  .features {
+    padding: 60px 20px;
+  }
+
+  .platforms {
+    padding: 60px 20px;
+  }
+
+  .steps {
+    padding: 60px 20px;
+  }
+
+  .feature-card {
+    padding: 28px 20px;
+  }
+}
