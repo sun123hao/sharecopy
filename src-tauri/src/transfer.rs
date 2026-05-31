@@ -120,7 +120,7 @@ impl FileTransferManager {
             save_path: None,
         });
 
-        // 分块发送
+        // 流式分块发送：编一块发一块，立即开始传输，无需等全部编码完成
         let network = self.network.clone();
         let progress_tx = self.progress_tx.clone();
         let tid = transfer_id.clone();
@@ -128,57 +128,40 @@ impl FileTransferManager {
         let target_id = target_device_id.to_string();
 
         tokio::spawn(async move {
-            // 预计算所有块的 SHA256 和编码（spawn_blocking 避免阻塞异步线程）
-            let tid_for_encode = tid.clone();
-            let encoded: Vec<(Vec<u8>, u64)> = match tokio::task::spawn_blocking(move || {
-                let mut v = Vec::with_capacity(total_chunks as usize);
-                for i in 0..total_chunks {
-                    let start = i as usize * CHUNK_SIZE;
-                    let end = std::cmp::min(start + CHUNK_SIZE, file_data.len());
-                    let chunk = &file_data[start..end];
-                    // 逐块 SHA256 不计算（最终文件 SHA256 足够），发送空 hash 走快速路径
-                    let chunk_sha256 = String::new();
-                    let msg = Message::FileDataChunk(FileDataChunkPayload {
-                        transfer_id: tid_for_encode.clone(),
-                        chunk_index: i,
-                        total_chunks,
-                        data: chunk.to_vec(),
-                        sha256_chunk: chunk_sha256,
-                    });
-                    match msg.encode() {
-                        Ok(encoded) => v.push((encoded, end as u64)),
-                        Err(e) => {
-                            tracing::error!("编码块 {} 失败: {}", i, e);
-                            return v;
+            for i in 0..total_chunks {
+                let start = i as usize * CHUNK_SIZE;
+                let end = std::cmp::min(start + CHUNK_SIZE, file_data.len());
+                let chunk = file_data[start..end].to_vec();
+
+                let msg = Message::FileDataChunk(FileDataChunkPayload {
+                    transfer_id: tid.clone(),
+                    chunk_index: i,
+                    total_chunks,
+                    data: chunk,
+                    sha256_chunk: String::new(),
+                });
+
+                match msg.encode() {
+                    Ok(encoded) => {
+                        if let Err(e) = network.send_raw(&target_id, encoded) {
+                            tracing::error!("发送文件块 {} 失败: {}", i, e);
+                            let _ = progress_tx.send(TransferProgress {
+                                transfer_id: tid.clone(),
+                                file_name: fname.clone(),
+                                file_size,
+                                bytes_transferred: end as u64,
+                                progress: end as f64 / file_size as f64,
+                                state: TransferState::Failed,
+                                error: Some(format!("发送失败: {}", e)),
+                                save_path: None,
+                            });
+                            return;
                         }
                     }
-                }
-                v
-            })
-            .await
-            {
-                Ok(v) => v,
-                Err(e) => {
-                    tracing::error!("spawn_blocking 失败: {}", e);
-                    return;
-                }
-            };
-
-            // 快速推送预编码块（无 CPU 间隙，管道满载）
-            for (data, end) in encoded {
-                if let Err(e) = network.send_raw(&target_id, data) {
-                    tracing::error!("发送文件块失败: {}", e);
-                    let _ = progress_tx.send(TransferProgress {
-                        transfer_id: tid.clone(),
-                        file_name: fname.clone(),
-                        file_size,
-                        bytes_transferred: end,
-                        progress: end as f64 / file_size as f64,
-                        state: TransferState::Failed,
-                        error: Some(format!("发送失败: {}", e)),
-                        save_path: None,
-                    });
-                    return;
+                    Err(e) => {
+                        tracing::error!("编码块 {} 失败: {}", i, e);
+                        return;
+                    }
                 }
 
                 let progress = end as f64 / file_size as f64;
@@ -186,9 +169,9 @@ impl FileTransferManager {
                     transfer_id: tid.clone(),
                     file_name: fname.clone(),
                     file_size,
-                    bytes_transferred: end,
+                    bytes_transferred: end as u64,
                     progress,
-                    state: if end == file_size {
+                    state: if i + 1 == total_chunks {
                         TransferState::Completed
                     } else {
                         TransferState::Transferring
