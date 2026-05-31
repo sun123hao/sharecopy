@@ -3,6 +3,7 @@ import { Monitor, SendHorizonal, RefreshCw } from 'lucide-react';
 import { useAppStore } from '../store/useAppStore';
 import { useDeviceOnline, useDeviceOffline } from '../hooks/useTauriEvents';
 import { sendFiles } from '../hooks/useTauriCommands';
+import { useDragDropFiles } from '../hooks/useDragDropFiles';
 import type { DiscoveredDevice } from '../types';
 
 function deviceInitial(name: string): string {
@@ -50,6 +51,9 @@ export function DeviceList() {
     removeDevice(deviceId);
   });
 
+  // 拖放文件传输
+  const { dragState, hoveredDeviceId } = useDragDropFiles();
+
   const handleSendFile = async (targetDeviceId: string) => {
     try {
       const { open } = await import('@tauri-apps/plugin-dialog');
@@ -96,7 +100,20 @@ export function DeviceList() {
           {devices.map((device) => (
             <div
               key={device.device_id}
-              className="flex items-center gap-3 p-3 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-sm hover:shadow-md hover:border-slate-300 dark:hover:border-slate-600 transition-all"
+              data-drop-device={device.device_id}
+              className={`flex items-center gap-3 p-3 rounded-xl bg-white dark:bg-slate-800 shadow-sm transition-all duration-200${
+                dragState.phase === 'dragging'
+                  ? ' border-2 border-dashed border-amber-300/60 dark:border-amber-500/40 cursor-copy'
+                  : ' border border-slate-200 dark:border-slate-700 hover:shadow-md hover:border-slate-300 dark:hover:border-slate-600'
+              }${
+                hoveredDeviceId === device.device_id
+                  ? ' !border-amber-400 dark:!border-amber-400 !border-solid scale-[1.02] shadow-lg shadow-amber-500/20 drop-target-glow bg-amber-50/50 dark:bg-amber-500/5'
+                  : ''
+              }${
+                dragState.phase === 'dragging' && hoveredDeviceId !== device.device_id
+                  ? ' opacity-50 scale-[0.98]'
+                  : ''
+              }`}
             >
               {/* 首字母头像 */}
               <div

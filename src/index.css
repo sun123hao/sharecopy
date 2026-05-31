@@ -76,3 +76,24 @@ body.dark,
     min-width: 44px;
   }
 }
+
+/* ── 拖放文件传输相关 ──────────────────── */
+
+/* 拖放悬停时的光晕脉冲 */
+@keyframes drop-glow {
+  0%, 100% {
+    box-shadow: 0 0 8px rgba(245, 158, 11, 0.3);
+  }
+  50% {
+    box-shadow: 0 0 16px rgba(245, 158, 11, 0.5);
+  }
+}
+
+.drop-target-glow {
+  animation: drop-glow 1.5s ease-in-out infinite;
+}
+
+/* 拖放进行中时禁止文本选中（防止误选中设备名） */
+.is-dragging * {
+  user-select: none;
+}
