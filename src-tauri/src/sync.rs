@@ -915,16 +915,28 @@ impl SyncEngine {
     fn add_history_entry(&self, entry_type: &str, content: &str, from_device: &str) {
         let snapshot = {
             let mut history = self.history.lock();
-            let entry = ClipboardHistoryEntry {
-                id: uuid::Uuid::new_v4().to_string(),
-                entry_type: entry_type.to_string(),
-                content: content.to_string(),
-                from_device: from_device.to_string(),
-                timestamp: chrono::Utc::now().timestamp_millis() as u64,
-            };
-            history.insert(0, entry);
-            if history.len() > MAX_HISTORY_ENTRIES {
-                history.truncate(MAX_HISTORY_ENTRIES);
+
+            // 连续重复内容归为一条：检查最新记录是否相同
+            let is_duplicate = history.first()
+                .map(|e| e.entry_type == entry_type && e.content == content)
+                .unwrap_or(false);
+
+            if is_duplicate {
+                if let Some(latest) = history.first_mut() {
+                    latest.timestamp = chrono::Utc::now().timestamp_millis() as u64;
+                }
+            } else {
+                let entry = ClipboardHistoryEntry {
+                    id: uuid::Uuid::new_v4().to_string(),
+                    entry_type: entry_type.to_string(),
+                    content: content.to_string(),
+                    from_device: from_device.to_string(),
+                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                };
+                history.insert(0, entry);
+                if history.len() > MAX_HISTORY_ENTRIES {
+                    history.truncate(MAX_HISTORY_ENTRIES);
+                }
             }
             history.clone() // 在锁内克隆，释放锁后再 I/O
         };
