@@ -62,7 +62,8 @@ jni = "0.21"
 
 # Release 优化：减小 Android APK 体积
 [profile.release]
-opt-level = "s"    # 优化体积
-lto = true         # 链接时优化
-codegen-units = 1  # 更好的优化效果
-strip = "symbols"  # 去除符号表
+opt-level = "z"     # 激进优化体积（比 s 更小）
+lto = true          # 链接时优化
+codegen-units = 1   # 更好的优化效果
+strip = true        # 去除所有符号
+panic = "abort"     # 移除 panic unwind 开销，减小体积
