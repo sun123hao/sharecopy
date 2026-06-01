@@ -16,6 +16,7 @@ export interface AppConfig {
   save_dir: string;
   auto_start: boolean;
   sync_enabled: boolean;
+  /** @deprecated 后端始终自动接收，UI 已移除该选项 */
   auto_accept_files: boolean;
   poll_interval_active_ms: number;
   poll_interval_idle_ms: number;

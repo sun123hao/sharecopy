@@ -23,7 +23,8 @@ pub struct AppConfig {
     pub auto_start: bool,
     /// 是否启用剪贴板同步
     pub sync_enabled: bool,
-    /// 是否自动接收文件（false 则每次询问）
+    /// [已废弃] 是否自动接收文件。后端始终自动接收，该字段仅保留以兼容已有配置文件。
+    #[serde(default)]
     pub auto_accept_files: bool,
     /// 剪贴板轮询间隔（毫秒）
     pub poll_interval_active_ms: u64,

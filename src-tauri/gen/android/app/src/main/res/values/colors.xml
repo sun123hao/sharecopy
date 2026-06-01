@@ -8,4 +8,9 @@
     <color name="black">#FF000000</color>
     <color name="white">#FFFFFFFF</color>
     <color name="ic_launcher_background">#F59E0B</color>
+    <color name="permission_title">#1a1a1a</color>
+    <color name="permission_text">#666666</color>
+    <color name="permission_btn_cancel_bg">#F2F2F7</color>
+    <color name="permission_btn_go_bg">#007AFF</color>
+    <color name="permission_btn_go_text">#FFFFFF</color>
 </resources>

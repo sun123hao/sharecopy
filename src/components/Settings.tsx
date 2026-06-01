@@ -41,7 +41,6 @@ export function Settings({ theme, setTheme }: { theme: Theme; setTheme: (t: Them
   const [deviceName, setDeviceName] = useState('');
   const [saveDir, setSaveDir] = useState('');
   const [autoStart, setAutoStart] = useState(false);
-  const [autoAccept, setAutoAccept] = useState(true);
   const [historyRetention, setHistoryRetention] = useState(0);
   const [transferRetention, setTransferRetention] = useState(0);
 
@@ -52,7 +51,6 @@ export function Settings({ theme, setTheme }: { theme: Theme; setTheme: (t: Them
       setDeviceName(config.device_name);
       setSaveDir(config.save_dir);
       setAutoStart(config.auto_start);
-      setAutoAccept(config.auto_accept_files);
       setHistoryRetention(config.history_retention_days ?? 0);
       setTransferRetention(config.transfer_retention_days ?? 0);
     }
@@ -80,10 +78,6 @@ export function Settings({ theme, setTheme }: { theme: Theme; setTheme: (t: Them
   const handleToggleAutoStart = () => {
     const newVal = !autoStart; setAutoStart(newVal);
     if (config) updateConfigAction({ ...config, auto_start: newVal });
-  };
-  const handleToggleAutoAccept = () => {
-    const newVal = !autoAccept; setAutoAccept(newVal);
-    if (config) updateConfigAction({ ...config, auto_accept_files: newVal });
   };
   const handleRetentionChange = (days: number) => {
     setHistoryRetention(days);
@@ -186,10 +180,6 @@ export function Settings({ theme, setTheme }: { theme: Theme; setTheme: (t: Them
           <Toggle checked={autoStart} onChange={handleToggleAutoStart} />
         </button>
         )}
-        <button onClick={handleToggleAutoAccept} className={`w-full text-left ${rowClass} hover:bg-black/[0.02] dark:hover:bg-white/[0.02] transition-colors`}>
-          <div><p className="text-[15px]">自动接收文件</p><p className="text-[11px] text-black/40 dark:text-white/40 mt-0.5">无需确认直接保存接收的文件</p></div>
-          <Toggle checked={autoAccept} onChange={handleToggleAutoAccept} />
-        </button>
       </div>
 
       {/* 历史保留 */}

@@ -14,7 +14,23 @@ use crate::protocol::{FrameDecoder, HeartbeatPayload, Message};
 pub const HEARTBEAT_INTERVAL_SECS: u64 = 10;
 pub const HEARTBEAT_TIMEOUT_SECS: u64 = 30;
 /// TCP 写入超时：如果 5 秒内无法完成写入，认为连接已断开
-pub const WRITE_TIMEOUT_SECS: u64 = 5;
+pub const WRITE_TIMEOUT_SECS: u64 = 30;
+
+/// 增大 TCP socket 缓冲区提升吞吐量（macOS/Linux/Android）
+#[cfg(any(target_os = "macos", target_os = "linux", target_os = "android"))]
+fn set_socket_buffers(stream: &tokio::net::TcpStream) {
+    use std::os::unix::io::AsRawFd;
+    let fd = stream.as_raw_fd();
+    let bufsize: libc::c_int = 1024 * 1024; // 1MB
+    unsafe {
+        libc::setsockopt(fd, libc::SOL_SOCKET, libc::SO_RCVBUF, &bufsize as *const _ as *const libc::c_void, std::mem::size_of_val(&bufsize) as u32);
+        libc::setsockopt(fd, libc::SOL_SOCKET, libc::SO_SNDBUF, &bufsize as *const _ as *const libc::c_void, std::mem::size_of_val(&bufsize) as u32);
+    }
+}
+
+/// Windows 暂不调整缓冲区
+#[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "android")))]
+fn set_socket_buffers(_stream: &tokio::net::TcpStream) {}
 
 // ── 网络事件 ──────────────────────────────
 #[derive(Debug, Clone)]
@@ -183,8 +199,9 @@ impl NetworkManager {
         last_activity: Arc<DashMap<String, Instant>>,
         notified: Arc<DashMap<String, ()>>,
     ) -> AppResult<()> {
-        // TCP 优化：禁用 Nagle，减少小包延迟
+        // TCP 优化：禁用 Nagle，增大缓冲区提升吞吐量
         stream.set_nodelay(true).ok();
+        set_socket_buffers(&stream);
 
         // 等待握手消息
         let mut decoder = FrameDecoder::new();
@@ -442,8 +459,9 @@ impl NetworkManager {
             }
         };
 
-        // TCP 优化：禁用 Nagle
+        // TCP 优化：禁用 Nagle，增大缓冲区
         stream.set_nodelay(true).ok();
+        set_socket_buffers(&stream);
 
         // 发送握手消息
         let handshake = Message::DeviceInfo(crate::protocol::DeviceInfoPayload {

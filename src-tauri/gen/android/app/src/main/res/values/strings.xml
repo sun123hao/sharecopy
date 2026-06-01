@@ -1,4 +1,9 @@
 <resources>
     <string name="app_name">ShareCopy</string>
     <string name="main_activity_title">ShareCopy</string>
+    <string name="permission_title">权限设置</string>
+    <string name="permission_message">ShareCopy 需要以下权限才能正常运行：\n\n• 剪贴板读写 — 同步剪贴板内容\n• 电池优化 — 防止息屏后断连</string>
+    <string name="btn_cancel">取消</string>
+    <string name="btn_go_settings">去设置</string>
+    <string name="toast_permission_failed">无法打开权限设置，请手动前往 设置 → 应用 → ShareCopy</string>
 </resources>

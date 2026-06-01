@@ -5,6 +5,7 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
+import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.os.IBinder
@@ -22,6 +23,20 @@ class ShareCopyService : Service() {
         const val CHANNEL_ID = "sharecopy_sync"
         const val NOTIFICATION_ID = 1001
         const val ACTION_STOP = "com.sharecopy.app.STOP_SERVICE"
+
+        /** 启动前台服务，统一处理版本兼容 */
+        fun start(context: Context) {
+            val intent = Intent(context, ShareCopyService::class.java)
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    context.startForegroundService(intent)
+                } else {
+                    context.startService(intent)
+                }
+            } catch (e: Exception) {
+                android.util.Log.w("ShareCopy", "启动服务失败", e)
+            }
+        }
     }
 
     override fun onCreate() {
