@@ -38,9 +38,12 @@ export function useDragDropFiles() {
   /** 设备卡片 bounding rect 缓存，避免 over 事件中反复触发强制同步布局 */
   const cardsRectsRef = useRef<Map<string, DOMRect>>(new Map());
 
-  /** 将 Tauri 窗口坐标（物理像素）转为 webview 内容区 CSS 坐标（逻辑像素） */
+  /** 是否需要对坐标做 DPR 缩放（Windows/Linux 返回物理像素，macOS 已返回逻辑像素） */
+  const needsDprScale = useRef(false);
+
+  /** 将 Tauri 窗口坐标转为 webview 内容区 CSS 坐标 */
   const toCssPosition = useCallback((x: number, y: number) => {
-    const dpr = window.devicePixelRatio || 1;
+    const dpr = needsDprScale.current ? (window.devicePixelRatio || 1) : 1;
     return { x: x / dpr, y: y / dpr - titleBarHeight.current };
   }, []);
 
@@ -111,14 +114,17 @@ export function useDragDropFiles() {
   }, []);
 
   useEffect(() => {
-    // 检测平台设置标题栏高度（Tauri 窗口坐标偏移量）
+    // 检测平台设置标题栏高度和坐标缩放策略
     const platform = navigator.platform || '';
     if (platform.includes('Win')) {
       titleBarHeight.current = 32; // Windows 标题栏
+      needsDprScale.current = true; // Windows 返回物理像素，需 DPR 缩放
     } else if (platform.includes('Mac')) {
       titleBarHeight.current = 28; // macOS 标题栏
+      needsDprScale.current = false; // macOS 已返回逻辑像素，无需缩放
     } else if (platform.includes('Linux')) {
       titleBarHeight.current = 30; // Linux (GNOME/KDE) 标题栏
+      needsDprScale.current = true; // Linux 返回物理像素，需 DPR 缩放
     } else {
       titleBarHeight.current = 0;
     }
