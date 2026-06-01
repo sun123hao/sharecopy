@@ -120,7 +120,7 @@ export function useDragDropFiles() {
       titleBarHeight.current = 32; // Windows 标题栏
       needsDprScale.current = true; // Windows 返回物理像素，需 DPR 缩放
     } else if (platform.includes('Mac')) {
-      titleBarHeight.current = 28; // macOS 标题栏
+      titleBarHeight.current = 0; // macOS 坐标相对于内容区，无需偏移
       needsDprScale.current = false; // macOS 已返回逻辑像素，无需缩放
     } else if (platform.includes('Linux')) {
       titleBarHeight.current = 30; // Linux (GNOME/KDE) 标题栏
