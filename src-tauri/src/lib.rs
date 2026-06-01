@@ -113,6 +113,7 @@ async fn update_config(
     config.poll_interval_active_ms = new_config.poll_interval_active_ms;
     config.poll_interval_idle_ms = new_config.poll_interval_idle_ms;
     config.history_retention_days = new_config.history_retention_days;
+    config.transfer_retention_days = new_config.transfer_retention_days;
     config.save().map_err(|e| e.to_string())
 }
 
@@ -229,20 +230,13 @@ async fn is_sync_enabled(state: tauri::State<'_, AppState>) -> Result<bool, Stri
 /// 在文件管理器中打开文件所在目录
 #[tauri::command]
 async fn open_file_dir(path: String) -> Result<(), String> {
-    #[cfg(target_os = "android")]
-    {
-        crate::android_file::open_directory(&path).map_err(|e| e.to_string())
-    }
-    #[cfg(not(target_os = "android"))]
-    {
-        tokio::task::spawn_blocking(move || {
-            let p = std::path::Path::new(&path);
-            let dir = if p.is_dir() { p } else { p.parent().unwrap_or(p) };
-            open::that(dir).map_err(|e| format!("打开目录失败: {}", e))
-        })
-        .await
-        .map_err(|e| format!("打开目录失败: {}", e))?
-    }
+    tokio::task::spawn_blocking(move || {
+        let p = std::path::Path::new(&path);
+        let dir = if p.is_dir() { p } else { p.parent().unwrap_or(p) };
+        open::that(dir).map_err(|e| format!("打开目录失败: {}", e))
+    })
+    .await
+    .map_err(|e| format!("打开目录失败: {}", e))?
 }
 
 // ── 应用入口 ──────────────────────────
@@ -451,6 +445,7 @@ pub fn run() {
             // 创建同步引擎
             let config_dir = AppConfig::config_dir();
             let retention_days = app_config.history_retention_days;
+            let transfer_retention = app_config.transfer_retention_days;
             let sync_engine = Arc::new(SyncEngine::new(
                 device_id.clone(),
                 watcher.clone(),
@@ -458,7 +453,7 @@ pub fn run() {
                 network.clone(),
                 transfer_manager.clone(),
                 app.app_handle().clone(),
-                config_dir,
+                config_dir.clone(),
                 retention_days,
             ));
 
@@ -503,11 +498,40 @@ pub fn run() {
                 watcher_clone.run().await;
             });
 
-            // 转发传输进度事件到前端
+            // 传输记录持久化文件
+            let transfers_file = config_dir.join("transfers.json");
+
+            // 启动时加载持久化传输记录并发送到前端
+            let app_handle_load = app.app_handle().clone();
+            if transfer_retention > 0 {
+                if let Ok(data) = std::fs::read_to_string(&transfers_file) {
+                    if let Ok(transfers) = serde_json::from_str::<Vec<transfer::TransferProgress>>(&data) {
+                        let cutoff = chrono::Utc::now().timestamp_millis() as u64
+                            - (transfer_retention as u64 * 24 * 3600 * 1000);
+                        for t in transfers {
+                            if t.timestamp >= cutoff {
+                                let _ = app_handle_load.emit("transfer-progress", &t);
+                            }
+                        }
+                    }
+                }
+            } else {
+                let _ = std::fs::remove_file(&transfers_file);
+            }
+
+            // 转发传输进度事件到前端，完成/失败时持久化
             let app_handle = app.app_handle().clone();
             tauri::async_runtime::spawn(async move {
+                let mut saved: Vec<transfer::TransferProgress> = Vec::new();
                 while let Some(progress) = progress_rx.recv().await {
                     let _ = app_handle.emit("transfer-progress", &progress);
+                    // 完成或失败的传输记录持久化到磁盘
+                    if matches!(progress.state, transfer::TransferState::Completed | transfer::TransferState::Failed) {
+                        saved.push(progress);
+                        if let Ok(json) = serde_json::to_string(&saved) {
+                            let _ = std::fs::write(&transfers_file, &json);
+                        }
+                    }
                 }
             });
 

@@ -20,6 +20,7 @@ export interface AppConfig {
   poll_interval_active_ms: number;
   poll_interval_idle_ms: number;
   history_retention_days: number; // 0=关闭即清, 1/3/5=保留天数
+  transfer_retention_days: number; // 0=关闭即清, 1/3/5=保留天数
 }
 
 // ── 同步统计 ──────────────────────────

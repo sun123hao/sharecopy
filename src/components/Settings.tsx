@@ -43,6 +43,7 @@ export function Settings({ theme, setTheme }: { theme: Theme; setTheme: (t: Them
   const [autoStart, setAutoStart] = useState(false);
   const [autoAccept, setAutoAccept] = useState(true);
   const [historyRetention, setHistoryRetention] = useState(0);
+  const [transferRetention, setTransferRetention] = useState(0);
 
   useEffect(() => { loadConfig(); }, [loadConfig]);
 
@@ -53,6 +54,7 @@ export function Settings({ theme, setTheme }: { theme: Theme; setTheme: (t: Them
       setAutoStart(config.auto_start);
       setAutoAccept(config.auto_accept_files);
       setHistoryRetention(config.history_retention_days ?? 0);
+      setTransferRetention(config.transfer_retention_days ?? 0);
     }
   }, [config]);
 
@@ -86,6 +88,10 @@ export function Settings({ theme, setTheme }: { theme: Theme; setTheme: (t: Them
   const handleRetentionChange = (days: number) => {
     setHistoryRetention(days);
     if (config) updateConfigAction({ ...config, history_retention_days: days });
+  };
+  const handleTransferRetentionChange = (days: number) => {
+    setTransferRetention(days);
+    if (config) updateConfigAction({ ...config, transfer_retention_days: days });
   };
 
   /* ── iOS 18+ 分组卡片样式 ── */
@@ -204,6 +210,36 @@ export function Settings({ theme, setTheme }: { theme: Theme; setTheme: (t: Them
                 <button
                   key={opt.days}
                   onClick={() => handleRetentionChange(opt.days)}
+                  className={`px-4 py-2 rounded-[8px] text-[13px] font-medium transition-all duration-200 ${
+                    isActive
+                      ? 'bg-accent text-white shadow-[0_2px_8px_rgba(0,122,255,0.3)]'
+                      : 'ios-card border border-white/10 text-black/60 dark:text-white/60 hover:text-black dark:hover:text-white'
+                  }`}
+                >{opt.label}</button>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+
+      {/* 传输记录保留 */}
+      <div className={groupClass}>
+        <div className={groupHeaderClass}>传输记录保留</div>
+        <div className={rowClass} style={{ flexDirection: 'column', alignItems: 'flex-start', gap: 10 }}>
+          <span className="text-[15px]">传输记录</span>
+          <p className="text-[11px] text-black/40 dark:text-white/40 -mt-1">关闭后重新打开时保留最近多少天的传输记录</p>
+          <div className="flex gap-2">
+            {[
+              { days: 0, label: '关闭即清' },
+              { days: 1, label: '1 天' },
+              { days: 3, label: '3 天' },
+              { days: 5, label: '5 天' },
+            ].map((opt) => {
+              const isActive = transferRetention === opt.days;
+              return (
+                <button
+                  key={opt.days}
+                  onClick={() => handleTransferRetentionChange(opt.days)}
                   className={`px-4 py-2 rounded-[8px] text-[13px] font-medium transition-all duration-200 ${
                     isActive
                       ? 'bg-accent text-white shadow-[0_2px_8px_rgba(0,122,255,0.3)]'

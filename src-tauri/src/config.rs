@@ -31,6 +31,9 @@ pub struct AppConfig {
     /// 剪贴板历史保留天数（0=关闭即清，1/3/5=保留天数）
     #[serde(default)]
     pub history_retention_days: u32,
+    /// 传输记录保留天数（0=关闭即清，1/3/5=保留天数）
+    #[serde(default)]
+    pub transfer_retention_days: u32,
 }
 
 impl Default for AppConfig {
@@ -51,6 +54,7 @@ impl Default for AppConfig {
             poll_interval_active_ms: 200,
             poll_interval_idle_ms: 2000,
             history_retention_days: 0,
+            transfer_retention_days: 0,
         }
     }
 }

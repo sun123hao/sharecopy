@@ -3,7 +3,9 @@ import { CheckCircle2, XCircle, X, FolderOpen } from 'lucide-react';
 import { useAppStore } from '../store/useAppStore';
 import { useTransferProgress } from '../hooks/useTauriEvents';
 import { cancelTransfer, openFileDir } from '../hooks/useTauriCommands';
+import { detectPlatform } from '../hooks/usePlatform';
 import { formatTime } from '../utils/time';
+import toast from 'react-hot-toast';
 
 export function TransferProgressPanel({ deviceId }: { deviceId?: string }) {
   const allTransfers = useAppStore((s) => s.transfers);
@@ -50,7 +52,11 @@ export function TransferProgressPanel({ deviceId }: { deviceId?: string }) {
 
   const handleOpenDir = async (savePath?: string) => {
     if (!savePath) return;
-    try { await openFileDir(savePath); } catch (e) { console.error('打开目录失败:', e); }
+    if (detectPlatform() === 'android') {
+      toast.success(`文件保存在:\n${savePath}`, { duration: 4000 });
+    } else {
+      try { await openFileDir(savePath); } catch (e) { console.error('打开目录失败:', e); }
+    }
   };
 
   return (
