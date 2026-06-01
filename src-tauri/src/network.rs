@@ -16,21 +16,13 @@ pub const HEARTBEAT_TIMEOUT_SECS: u64 = 30;
 /// TCP 写入超时：如果 5 秒内无法完成写入，认为连接已断开
 pub const WRITE_TIMEOUT_SECS: u64 = 30;
 
-/// 增大 TCP socket 缓冲区提升吞吐量（macOS/Linux/Android）
-#[cfg(any(target_os = "macos", target_os = "linux", target_os = "android"))]
+/// 增大 TCP socket 缓冲区提升吞吐量（全平台：macOS/Linux/Android/Windows）
 fn set_socket_buffers(stream: &tokio::net::TcpStream) {
-    use std::os::unix::io::AsRawFd;
-    let fd = stream.as_raw_fd();
-    let bufsize: libc::c_int = 1024 * 1024; // 1MB
-    unsafe {
-        libc::setsockopt(fd, libc::SOL_SOCKET, libc::SO_RCVBUF, &bufsize as *const _ as *const libc::c_void, std::mem::size_of_val(&bufsize) as u32);
-        libc::setsockopt(fd, libc::SOL_SOCKET, libc::SO_SNDBUF, &bufsize as *const _ as *const libc::c_void, std::mem::size_of_val(&bufsize) as u32);
-    }
+    use socket2::SockRef;
+    let sock = SockRef::from(stream);
+    let _ = sock.set_recv_buffer_size(1024 * 1024); // 1MB
+    let _ = sock.set_send_buffer_size(1024 * 1024); // 1MB
 }
-
-/// Windows 暂不调整缓冲区
-#[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "android")))]
-fn set_socket_buffers(_stream: &tokio::net::TcpStream) {}
 
 // ── 网络事件 ──────────────────────────────
 #[derive(Debug, Clone)]

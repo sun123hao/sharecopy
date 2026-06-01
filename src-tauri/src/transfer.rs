@@ -93,7 +93,7 @@ fn send_failed(
 pub struct FileTransferManager {
     save_dir: PathBuf,
     network: Arc<NetworkManager>,
-    incoming: parking_lot::Mutex<HashMap<String, IncomingTransfer>>,
+    incoming: Arc<parking_lot::Mutex<HashMap<String, IncomingTransfer>>>,
     progress_tx: mpsc::UnboundedSender<TransferProgress>,
     cancel_tokens: Arc<dashmap::DashMap<String, Arc<AtomicBool>>>,
 }
@@ -107,7 +107,7 @@ impl FileTransferManager {
         Self {
             save_dir,
             network,
-            incoming: parking_lot::Mutex::new(HashMap::new()),
+            incoming: Arc::new(parking_lot::Mutex::new(HashMap::new())),
             progress_tx,
             cancel_tokens: Arc::new(dashmap::DashMap::new()),
         }
@@ -361,103 +361,104 @@ impl FileTransferManager {
         }
     }
 
-    /// 处理文件数据块：流式直接写入磁盘（不阻塞网络读循环）
+    /// 处理文件数据块：后台写盘，不等待磁盘，立即返回继续读网络
     pub fn handle_file_chunk(&self, payload: &FileDataChunkPayload) -> AppResult<()> {
         let tid = payload.transfer_id.clone();
         let chunk_index = payload.chunk_index;
         let chunk_data = payload.data.clone();
+        let total_chunks = payload.total_chunks;
 
-        // 先读元数据（锁内），写完盘后再更新计数
-        let (fname, file_size, src_id, total_chunks) = {
+        // 读元数据
+        let (fname, file_size, src_id) = {
             let incoming = self.incoming.lock();
             let transfer = incoming
-                .get(&payload.transfer_id)
+                .get(&tid)
                 .ok_or_else(|| AppError::Transfer("未知传输会话".into()))?;
-            (transfer.file_name.clone(), transfer.file_size, transfer.source_device_id.clone(), transfer.total_chunks)
+            (transfer.file_name.clone(), transfer.file_size, transfer.source_device_id.clone())
         };
 
-        // 异步写盘（block_in_place 避免阻塞 tokio 运行时 + 网络读循环）
+        // 后台写盘——不阻塞网络读取循环
         let save_dir = self.save_dir.clone();
-        let fname_clone = fname.clone();
+        let progress_tx = self.progress_tx.clone();
+        let incoming = self.incoming.clone();
         let chunk_size = CHUNK_SIZE as u64;
-        let result = tokio::task::block_in_place(|| {
-            let save_path = save_dir.join(&fname_clone);
-            if chunk_index == 0 {
+        let tid2 = tid.clone();
+        let fname2 = fname.clone();
+
+        tokio::task::spawn_blocking(move || {
+            let save_path = save_dir.join(&fname2);
+            let write_result = if chunk_index == 0 {
                 std::fs::write(&save_path, &chunk_data)
                     .map_err(|e| AppError::Transfer(format!("写入文件失败: {}", e)))
             } else {
-                let mut file = std::fs::OpenOptions::new()
-                    .write(true).create(true)
-                    .open(&save_path)
-                    .map_err(|e| AppError::Transfer(format!("打开文件失败: {}", e)))?;
-                file.seek(SeekFrom::Start(chunk_index as u64 * chunk_size))
-                    .map_err(|e| AppError::Transfer(format!("seek 失败: {}", e)))?;
-                file.write_all(&chunk_data)
-                    .map_err(|e| AppError::Transfer(format!("写入文件失败: {}", e)))
+                (|| {
+                    let mut file = std::fs::OpenOptions::new()
+                        .write(true).create(true)
+                        .open(&save_path)
+                        .map_err(|e| AppError::Transfer(format!("打开文件失败: {}", e)))?;
+                    file.seek(SeekFrom::Start(chunk_index as u64 * chunk_size))
+                        .map_err(|e| AppError::Transfer(format!("seek 失败: {}", e)))?;
+                    file.write_all(&chunk_data)
+                        .map_err(|e| AppError::Transfer(format!("写入文件失败: {}", e)))
+                })()
+            };
+
+            let mut incoming = incoming.lock();
+
+            if let Err(err_msg) = write_result {
+                incoming.remove(&tid2);
+                let _ = std::fs::remove_file(&save_path);
+                let _ = progress_tx.send(TransferProgress {
+                    transfer_id: tid2, file_name: fname2, file_size,
+                    bytes_transferred: 0, progress: 0.0,
+                    state: TransferState::Failed, error: Some(err_msg.to_string()),
+                    save_path: None, device_id: Some(src_id),
+                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                });
+                return;
+            }
+
+            let transfer = match incoming.get_mut(&tid2) {
+                Some(t) => t,
+                None => return, // 已被取消
+            };
+            transfer.received_count += 1;
+
+            let received = transfer.received_count;
+            let progress = if total_chunks == 0 { 1.0 } else { received as f64 / total_chunks as f64 };
+
+            let _ = progress_tx.send(TransferProgress {
+                transfer_id: tid2.clone(),
+                file_name: transfer.file_name.clone(),
+                file_size,
+                bytes_transferred: std::cmp::min(received as u64 * chunk_size, file_size),
+                progress,
+                state: TransferState::Transferring,
+                error: None, save_path: None,
+                device_id: Some(transfer.source_device_id.clone()),
+                timestamp: chrono::Utc::now().timestamp_millis() as u64,
+            });
+
+            if received == total_chunks {
+                let transfer = incoming.remove(&tid2).unwrap();
+                drop(incoming);
+                let save_path = save_dir.join(&transfer.file_name);
+                let _ = progress_tx.send(TransferProgress {
+                    transfer_id: tid2,
+                    file_name: transfer.file_name.clone(),
+                    file_size,
+                    bytes_transferred: file_size,
+                    progress: 1.0,
+                    state: TransferState::Completed,
+                    error: None,
+                    save_path: Some(save_path.to_string_lossy().into_owned()),
+                    device_id: Some(transfer.source_device_id),
+                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                });
             }
         });
 
-        if let Err(err_msg) = &result {
-            // 写盘失败：清理会话 + 删除部分文件 + 通知前端
-            let save_path = self.save_dir.join(&fname);
-            self.incoming.lock().remove(&tid);
-            let _ = std::fs::remove_file(&save_path);
-            let _ = self.progress_tx.send(TransferProgress {
-                transfer_id: tid, file_name: fname, file_size,
-                bytes_transferred: 0, progress: 0.0,
-                state: TransferState::Failed, error: Some(err_msg.to_string()),
-                save_path: None, device_id: Some(src_id),
-                timestamp: chrono::Utc::now().timestamp_millis() as u64,
-            });
-            return Ok(());
-        }
-
-        // 重新获取锁，更新计数
-        let mut incoming = self.incoming.lock();
-        let transfer = match incoming.get_mut(&tid) {
-            Some(t) => t,
-            None => return Ok(()), // 可能已被取消
-        };
-        transfer.received_count += 1;
-
-        let received = transfer.received_count as u64;
-        let total = transfer.total_chunks as u64;
-        let progress = if total == 0 { 1.0 } else { received as f64 / total as f64 };
-
-        let src_id = transfer.source_device_id.clone();
-        let _ = self.progress_tx.send(TransferProgress {
-            transfer_id: payload.transfer_id.clone(),
-            file_name: transfer.file_name.clone(),
-            file_size: transfer.file_size,
-            bytes_transferred: std::cmp::min(received * CHUNK_SIZE as u64, transfer.file_size),
-            progress,
-            state: TransferState::Transferring,
-            error: None,
-            save_path: None,
-            device_id: Some(src_id),
-            timestamp: chrono::Utc::now().timestamp_millis() as u64,
-        });
-
-        if transfer.received_count == transfer.total_chunks {
-            let transfer = incoming.remove(&payload.transfer_id).unwrap();
-            drop(incoming);
-
-            let save_path = self.save_dir.join(&transfer.file_name);
-            let _ = self.progress_tx.send(TransferProgress {
-                transfer_id: payload.transfer_id.clone(),
-                file_name: transfer.file_name.clone(),
-                file_size: transfer.file_size,
-                bytes_transferred: transfer.file_size,
-                progress: 1.0,
-                state: TransferState::Completed,
-                error: None,
-                save_path: Some(save_path.to_string_lossy().into_owned()),
-                device_id: Some(transfer.source_device_id),
-                timestamp: chrono::Utc::now().timestamp_millis() as u64,
-            });
-        }
-
-        Ok(())
+        Ok(()) // 立即返回，不等磁盘
     }
 
     /// 获取默认保存目录
