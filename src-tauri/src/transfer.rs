@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -63,10 +63,11 @@ pub enum TransferState {
 struct IncomingTransfer {
     _transfer_id: String,
     source_device_id: String,
-    file_name: String,
+    file_name: String,       // 目标文件名
+    temp_path: PathBuf,      // 传输中临时文件路径（避免同名冲突）
     file_size: u64,
     total_chunks: u32,
-    received_count: u32,
+    received: HashSet<u32>,  // 已收到的 chunk 索引（去重）
 }
 
 // ── 辅助：发送失败进度事件 ────────────────────
@@ -285,13 +286,33 @@ impl FileTransferManager {
 
     /// 处理文件传输请求
     pub fn handle_file_request(&self, payload: &FileTransferReqPayload, source_device_id: &str) {
+        // 临时文件名：{name}.{transfer_id前8位}.tmp（避免同名冲突）
+        let short_id = &payload.transfer_id[..payload.transfer_id.len().min(8)];
+        let temp_name = format!("{}.{}.tmp", payload.file_name, short_id);
+        let temp_path = self.save_dir.join(&temp_name);
+
+        // 预分配文件大小（减少 Android FUSE 反复扩展文件的开销）
+        if payload.file_size > 0 {
+            match std::fs::File::create(&temp_path) {
+                Ok(file) => {
+                    if let Err(e) = file.set_len(payload.file_size) {
+                        tracing::warn!("预分配文件大小失败 ({}): {}", temp_path.display(), e);
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!("创建临时文件失败 ({}): {}", temp_path.display(), e);
+                }
+            }
+        }
+
         let transfer = IncomingTransfer {
             _transfer_id: payload.transfer_id.clone(),
             source_device_id: source_device_id.to_string(),
             file_name: payload.file_name.clone(),
+            temp_path,
             file_size: payload.file_size,
             total_chunks: payload.total_chunks,
-            received_count: 0,
+            received: HashSet::new(),
         };
 
         self.incoming
@@ -318,11 +339,9 @@ impl FileTransferManager {
             token.store(true, Ordering::Relaxed);
         }
 
-        // 清理接收端会话 + 删除未完成的文件
+        // 清理接收端会话 + 删除传输中的临时文件
         if let Some(removed) = self.incoming.lock().remove(transfer_id) {
-            let partial_path = self.save_dir.join(&removed.file_name);
-            let _ = std::fs::remove_file(&partial_path); // 忽略删除失败
-
+            let _ = std::fs::remove_file(&removed.temp_path);
             let _ = self.progress_tx.send(TransferProgress {
                 transfer_id: transfer_id.to_string(),
                 file_name: removed.file_name.clone(),
@@ -343,9 +362,7 @@ impl FileTransferManager {
     /// 处理远端发来的取消消息
     pub fn handle_transfer_cancel(&self, transfer_id: &str) {
         if let Some(removed) = self.incoming.lock().remove(transfer_id) {
-            let partial_path = self.save_dir.join(&removed.file_name);
-            let _ = std::fs::remove_file(&partial_path);
-
+            let _ = std::fs::remove_file(&removed.temp_path);
             let _ = self.progress_tx.send(TransferProgress {
                 transfer_id: transfer_id.to_string(),
                 file_name: removed.file_name.clone(),
@@ -368,46 +385,53 @@ impl FileTransferManager {
         let chunk_data = payload.data.clone();
         let total_chunks = payload.total_chunks;
 
-        // 读元数据
-        let (fname, file_size, src_id) = {
-            let incoming = self.incoming.lock();
+        // 读元数据 + 去重检查
+        let (fname, file_size, src_id, temp_path) = {
+            let mut incoming = self.incoming.lock();
             let transfer = incoming
-                .get(&tid)
+                .get_mut(&tid)
                 .ok_or_else(|| AppError::Transfer("未知传输会话".into()))?;
-            (transfer.file_name.clone(), transfer.file_size, transfer.source_device_id.clone())
+            // 去重：已收到的 chunk 跳过
+            if !transfer.received.insert(chunk_index) {
+                return Ok(());
+            }
+            (transfer.file_name.clone(), transfer.file_size, transfer.source_device_id.clone(), transfer.temp_path.clone())
         };
 
         // 后台写盘——不阻塞网络读取循环
-        let save_dir = self.save_dir.clone();
         let progress_tx = self.progress_tx.clone();
         let incoming = self.incoming.clone();
         let chunk_size = CHUNK_SIZE as u64;
         let tid2 = tid.clone();
         let fname2 = fname.clone();
+        let save_dir = self.save_dir.clone();
 
         tokio::task::spawn_blocking(move || {
-            let save_path = save_dir.join(&fname2);
-            let write_result = if chunk_index == 0 {
-                std::fs::write(&save_path, &chunk_data)
+            // 快速检查传输是否仍活跃（避免取消后仍写盘）
+            {
+                let lock = incoming.lock();
+                if !lock.contains_key(&tid2) {
+                    return; // 已被取消，跳过 I/O
+                }
+            }
+
+            // 写盘（文件已由 handle_file_request 预创建）
+            let write_result = (|| {
+                let mut file = std::fs::OpenOptions::new()
+                    .write(true) // 不用 create(true)，取消后文件已删除则 open 失败
+                    .open(&temp_path)
+                    .map_err(|e| AppError::Transfer(format!("打开文件失败: {}", e)))?;
+                file.seek(SeekFrom::Start(chunk_index as u64 * chunk_size))
+                    .map_err(|e| AppError::Transfer(format!("seek 失败: {}", e)))?;
+                file.write_all(&chunk_data)
                     .map_err(|e| AppError::Transfer(format!("写入文件失败: {}", e)))
-            } else {
-                (|| {
-                    let mut file = std::fs::OpenOptions::new()
-                        .write(true).create(true)
-                        .open(&save_path)
-                        .map_err(|e| AppError::Transfer(format!("打开文件失败: {}", e)))?;
-                    file.seek(SeekFrom::Start(chunk_index as u64 * chunk_size))
-                        .map_err(|e| AppError::Transfer(format!("seek 失败: {}", e)))?;
-                    file.write_all(&chunk_data)
-                        .map_err(|e| AppError::Transfer(format!("写入文件失败: {}", e)))
-                })()
-            };
+            })();
 
             let mut incoming = incoming.lock();
 
             if let Err(err_msg) = write_result {
                 incoming.remove(&tid2);
-                let _ = std::fs::remove_file(&save_path);
+                let _ = std::fs::remove_file(&temp_path);
                 let _ = progress_tx.send(TransferProgress {
                     transfer_id: tid2, file_name: fname2, file_size,
                     bytes_transferred: 0, progress: 0.0,
@@ -418,13 +442,11 @@ impl FileTransferManager {
                 return;
             }
 
-            let transfer = match incoming.get_mut(&tid2) {
+            let transfer = match incoming.get(&tid2) {
                 Some(t) => t,
                 None => return, // 已被取消
             };
-            transfer.received_count += 1;
-
-            let received = transfer.received_count;
+            let received = transfer.received.len() as u32;
             let progress = if total_chunks == 0 { 1.0 } else { received as f64 / total_chunks as f64 };
 
             let _ = progress_tx.send(TransferProgress {
@@ -440,9 +462,27 @@ impl FileTransferManager {
             });
 
             if received == total_chunks {
-                let transfer = incoming.remove(&tid2).unwrap();
+                // 所有块收齐：重命名临时文件 → 目标文件
+                let final_path = save_dir.join(&transfer.file_name);
+                if let Err(e) = std::fs::rename(&transfer.temp_path, &final_path) {
+                    let _ = progress_tx.send(TransferProgress {
+                        transfer_id: tid2,
+                        file_name: transfer.file_name.clone(), file_size,
+                        bytes_transferred: file_size, progress: 1.0,
+                        state: TransferState::Failed,
+                        error: Some(format!("重命名文件失败: {}", e)),
+                        save_path: None,
+                        device_id: Some(transfer.source_device_id.clone()),
+                        timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                    });
+                    return;
+                }
+                // 安全移除：仅当 rename 成功后才从 map 删除
+                let transfer = incoming.remove(&tid2).unwrap_or_else(|| {
+                    panic!("just checked: transfer must exist");
+                });
                 drop(incoming);
-                let save_path = save_dir.join(&transfer.file_name);
+
                 let _ = progress_tx.send(TransferProgress {
                     transfer_id: tid2,
                     file_name: transfer.file_name.clone(),
@@ -451,7 +491,7 @@ impl FileTransferManager {
                     progress: 1.0,
                     state: TransferState::Completed,
                     error: None,
-                    save_path: Some(save_path.to_string_lossy().into_owned()),
+                    save_path: Some(final_path.to_string_lossy().into_owned()),
                     device_id: Some(transfer.source_device_id),
                     timestamp: chrono::Utc::now().timestamp_millis() as u64,
                 });
