@@ -38,9 +38,10 @@ export function useDragDropFiles() {
   /** 设备卡片 bounding rect 缓存，避免 over 事件中反复触发强制同步布局 */
   const cardsRectsRef = useRef<Map<string, DOMRect>>(new Map());
 
-  /** 将 Tauri 窗口坐标转为 webview 内容区 CSS 坐标 */
+  /** 将 Tauri 窗口坐标（物理像素）转为 webview 内容区 CSS 坐标（逻辑像素） */
   const toCssPosition = useCallback((x: number, y: number) => {
-    return { x, y: y - titleBarHeight.current };
+    const dpr = window.devicePixelRatio || 1;
+    return { x: x / dpr, y: y / dpr - titleBarHeight.current };
   }, []);
 
   /** 通过坐标命中检测找到目标设备 ID（精确匹配：光标正在卡片元素上） */

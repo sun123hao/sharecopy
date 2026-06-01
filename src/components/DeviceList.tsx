@@ -129,7 +129,7 @@ export function DeviceList({ onSelectDevice }: { onSelectDevice?: (deviceId: str
               </div>
 
               <div className="flex items-center gap-[10px]">
-                <span className="ios-card border border-ios-separator dark:border-white/5 text-[11px] font-medium text-black/40 dark:text-white/40 px-2 py-0.5 rounded-[7px]">
+                <span className="ios-card border border-ios-separator dark:border-white/5 text-[11px] font-medium text-black/40 dark:text-white/40 px-2 py-0.5 rounded-[7px] min-w-[52px] inline-block text-center">
                   :{device.tcp_port}
                 </span>
                 <button
