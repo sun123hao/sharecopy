@@ -209,12 +209,13 @@ async fn copy_from_history(
                 let data = base64::engine::general_purpose::STANDARD
                     .decode(&entry.content)
                     .map_err(|e| format!("Base64 解码失败: {}", e))?;
-                // arboard 写入 PNG 数据时无需精确宽高
                 clipboard::ClipboardContent::Image { width: 0, height: 0, data }
             }
             _ => return Err(format!("不支持的类型: {}", entry.entry_type)),
         };
-        state.sync_engine.write_to_clipboard(&content)
+        // 直接写入剪贴板，绕过 write_safely 的暂停/哈希保护
+        // write_safely 会预填哈希导致轮询器认为内容未变化而跳过
+        state.sync_engine.watcher.write_direct(&content)
             .map_err(|e| e.to_string())?;
     }
     Ok(())

@@ -179,4 +179,19 @@ impl ClipboardWatcher {
         self.resume();
         result
     }
+
+    /// 直接写入剪贴板（绕过暂停/哈希保护），用于用户主动"重新复制"
+    pub fn write_direct(&self, content: &ClipboardContent) -> AppResult<()> {
+        self.pause();
+        let result = self.backend.write(content);
+        if result.is_ok() {
+            if let Ok(cc) = self.backend.change_count() {
+                self.last_change_count.store(cc, Ordering::Relaxed);
+            }
+            // 更新哈希，防止轮询器将刚写入的内容当作新内容广播
+            *self.last_content_hash.lock() = Some(content.content_hash());
+        }
+        self.resume();
+        result
+    }
 }

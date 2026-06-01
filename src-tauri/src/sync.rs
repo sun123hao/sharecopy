@@ -85,7 +85,7 @@ impl ImageChunkAssembler {
 // ── 同步引擎 ──────────────────────────────
 pub struct SyncEngine {
     device_id: String,
-    watcher: Arc<ClipboardWatcher>,
+    pub watcher: Arc<ClipboardWatcher>,
     #[allow(dead_code)]
     discovery: Arc<std::sync::Mutex<DiscoveryService>>,
     network: Arc<NetworkManager>,
