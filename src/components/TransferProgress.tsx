@@ -1,3 +1,4 @@
+import { useMemo } from 'react';
 import { CheckCircle2, XCircle, X, FolderOpen } from 'lucide-react';
 import { useAppStore } from '../store/useAppStore';
 import { useTransferProgress } from '../hooks/useTauriEvents';
@@ -14,7 +15,7 @@ export function TransferProgressPanel({ deviceId }: { deviceId?: string }) {
   const transfers = deviceId
     ? allTransfers.filter((t) => t.device_id === deviceId)
     : allTransfers;
-  const dismissedSet = new Set(dismissedIds);
+  const dismissedSet = useMemo(() => new Set(dismissedIds), [dismissedIds]);
   // 全局面板：过滤掉已 dismiss 的记录；设备详情页：显示全部
   const visible = deviceId ? transfers : transfers.filter((t) => !dismissedSet.has(t.transfer_id));
   const displayed = deviceId ? visible : visible.slice(-1);

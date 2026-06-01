@@ -4,6 +4,7 @@ import { useAppStore } from '../store/useAppStore';
 import { useClipboardUpdated } from '../hooks/useTauriEvents';
 import { getClipboardHistory, copyFromHistory } from '../hooks/useTauriCommands';
 import { formatTime } from '../utils/time';
+import toast from 'react-hot-toast';
 import type { ClipboardEntry } from '../types';
 
 export function ClipboardHistory() {
@@ -28,7 +29,7 @@ export function ClipboardHistory() {
 
   const handleCopy = async (entry: ClipboardEntry) => {
     try { await copyFromHistory(entry.id); setCopiedId(entry.id); setTimeout(() => setCopiedId(null), 2000); }
-    catch (e) { console.error('重新复制失败:', e); }
+    catch (e) { toast.error('复制失败，请重试'); console.error('重新复制失败:', e); }
   };
 
   const truncateText = (text: string, maxLen = 80): string => {

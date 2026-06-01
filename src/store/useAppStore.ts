@@ -153,9 +153,12 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   dismissTransfer: (transferId: string) => {
-    set((state) => ({
-      dismissedIds: [...state.dismissedIds, transferId],
-    }));
+    set((state) => {
+      // 只保留仍在 transfers 中的 dismissed ID，同时添��新 ID
+      const activeIds = new Set(state.transfers.map((t) => t.transfer_id));
+      const cleaned = state.dismissedIds.filter((id) => activeIds.has(id));
+      return { dismissedIds: [...cleaned, transferId] };
+    });
   },
 
   selectDevice: (deviceId: string | null) => {

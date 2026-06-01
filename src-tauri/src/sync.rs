@@ -936,12 +936,6 @@ impl SyncEngine {
     fn save_history(&self, history: &[ClipboardHistoryEntry]) {
         match serde_json::to_string(history) {
             Ok(json) => {
-                if let Some(parent) = self.history_file.parent() {
-                    if let Err(e) = std::fs::create_dir_all(parent) {
-                        tracing::error!("创建历史目录失败: {}", e);
-                        return;
-                    }
-                }
                 if let Err(e) = std::fs::write(&self.history_file, &json) {
                     tracing::error!("写入历史文件失败: {} (path={})", e, self.history_file.display());
                 }
