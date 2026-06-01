@@ -229,13 +229,20 @@ async fn is_sync_enabled(state: tauri::State<'_, AppState>) -> Result<bool, Stri
 /// 在文件管理器中打开文件所在目录
 #[tauri::command]
 async fn open_file_dir(path: String) -> Result<(), String> {
-    tokio::task::spawn_blocking(move || {
-        let p = std::path::Path::new(&path);
-        let dir = if p.is_dir() { p } else { p.parent().unwrap_or(p) };
-        open::that(dir).map_err(|e| format!("打开目录失败: {}", e))
-    })
-    .await
-    .map_err(|e| format!("打开目录失败: {}", e))?
+    #[cfg(target_os = "android")]
+    {
+        crate::android_file::open_directory(&path).map_err(|e| e.to_string())
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        tokio::task::spawn_blocking(move || {
+            let p = std::path::Path::new(&path);
+            let dir = if p.is_dir() { p } else { p.parent().unwrap_or(p) };
+            open::that(dir).map_err(|e| format!("打开目录失败: {}", e))
+        })
+        .await
+        .map_err(|e| format!("打开目录失败: {}", e))?
+    }
 }
 
 // ── 应用入口 ──────────────────────────
