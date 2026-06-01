@@ -55,9 +55,9 @@ export function DeviceTransferPage({ onBack }: { onBack: () => void }) {
   }
 
   return (
-    <div>
+    <div className="flex flex-col h-full">
       {/* 设备信息头部 */}
-      <div className="flex items-center gap-3 mb-5">
+      <div className="flex items-center gap-3 mb-5 flex-shrink-0">
         <button
           onClick={onBack}
           className="w-[34px] h-[34px] rounded-[10px] glass-chrome border border-white/10 flex items-center justify-center text-accent hover:scale-95 active:scale-90 transition-all duration-200 flex-shrink-0"

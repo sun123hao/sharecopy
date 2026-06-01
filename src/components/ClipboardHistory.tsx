@@ -1,12 +1,12 @@
 import { useEffect, useState, useMemo } from 'react';
-import { ClipboardList, FileText, Image as ImageIcon, File, Copy, Search, X } from 'lucide-react';
+import { ClipboardList, FileText, Image as ImageIcon, Copy, Search, X } from 'lucide-react';
 import { useAppStore } from '../store/useAppStore';
 import { useClipboardUpdated } from '../hooks/useTauriEvents';
 import { getClipboardHistory, copyFromHistory } from '../hooks/useTauriCommands';
+import { formatTime } from '../utils/time';
 import type { ClipboardEntry } from '../types';
 
 export function ClipboardHistory() {
-  const stats = useAppStore((s) => s.stats);
   const refreshStats = useAppStore((s) => s.refreshStats);
   const [entries, setEntries] = useState<ClipboardEntry[]>([]);
   const [search, setSearch] = useState('');
@@ -15,7 +15,7 @@ export function ClipboardHistory() {
   const loadHistory = async () => {
     try { setEntries(await getClipboardHistory()); } catch (e) { console.error('加载失败:', e); }
   };
-  useEffect(() => { refreshStats(); loadHistory(); }, [refreshStats]);
+  useEffect(() => { loadHistory(); }, []);
   useClipboardUpdated(() => { refreshStats(); loadHistory(); });
 
   const filteredEntries = useMemo(() => {
@@ -31,14 +31,6 @@ export function ClipboardHistory() {
     catch (e) { console.error('重新复制失败:', e); }
   };
 
-  const formatTime = (ts: number): string => {
-    const diff = Date.now() - ts;
-    if (diff < 60_000) return '刚刚';
-    if (diff < 3_600_000) return `${Math.floor(diff / 60_000)} 分钟前`;
-    if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)} 小时前`;
-    return new Date(ts).toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' });
-  };
-
   const truncateText = (text: string, maxLen = 80): string => {
     const singleLine = text.replace(/\n/g, ' ');
     return singleLine.length > maxLen ? singleLine.slice(0, maxLen) + '...' : singleLine;
@@ -46,24 +38,6 @@ export function ClipboardHistory() {
 
   return (
     <div>
-      {/* 统计卡片 */}
-      <div className="grid grid-cols-3 gap-2 mb-5">
-        {[
-          { n: stats.texts_synced, label: '条文本', icon: FileText, color: 'text-accent' },
-          { n: stats.images_synced, label: '张图片', icon: ImageIcon, color: 'text-ios-purple' },
-          { n: stats.files_transferred, label: '个文件', icon: File, color: 'text-ios-green' },
-        ].map((s) => {
-          const Icon = s.icon;
-          return (
-            <div key={s.label} className="p-3 rounded-[16px] ios-card border border-white/10 text-center">
-              <Icon className={`w-[18px] h-[18px] ${s.color} mx-auto mb-1.5`} />
-              <p className="text-[20px] font-semibold">{s.n}</p>
-              <p className="text-[11px] text-black/40 dark:text-white/40">{s.label}</p>
-            </div>
-          );
-        })}
-      </div>
-
       {entries.length === 0 ? (
         <div className="text-center py-16">
           <div className="w-[68px] h-[68px] mx-auto mb-4 rounded-[20px] ios-card border border-white/10 flex items-center justify-center">

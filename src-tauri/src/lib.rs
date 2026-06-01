@@ -112,6 +112,7 @@ async fn update_config(
     config.auto_accept_files = new_config.auto_accept_files;
     config.poll_interval_active_ms = new_config.poll_interval_active_ms;
     config.poll_interval_idle_ms = new_config.poll_interval_idle_ms;
+    config.history_retention_days = new_config.history_retention_days;
     config.save().map_err(|e| e.to_string())
 }
 
@@ -181,7 +182,17 @@ async fn get_android_save_dirs() -> Result<Vec<String>, String> {
 async fn get_clipboard_history(
     state: tauri::State<'_, AppState>,
 ) -> Result<Vec<sync::ClipboardHistoryEntry>, String> {
-    Ok(state.sync_engine.get_history())
+    let config = state.config.read().await;
+    let retention_days = config.history_retention_days;
+    let history = state.sync_engine.get_history();
+    if retention_days > 0 {
+        let cutoff = chrono::Utc::now().timestamp_millis() as u64
+            - (retention_days as u64 * 24 * 3600 * 1000);
+        Ok(history.into_iter().filter(|e| e.timestamp >= cutoff).collect())
+    } else {
+        // retention_days == 0: 关闭即清，返回空列表
+        Ok(Vec::new())
+    }
 }
 
 #[tauri::command]
@@ -189,8 +200,19 @@ async fn copy_from_history(
     state: tauri::State<'_, AppState>,
     entry_id: String,
 ) -> Result<(), String> {
+    let config = state.config.read().await;
+    let retention_days = config.history_retention_days;
     let history = state.sync_engine.get_history();
-    if let Some(entry) = history.iter().find(|e| e.id == entry_id) {
+    // 与 get_clipboard_history 保持一致的 retention 过滤
+    let filtered: Vec<_> = if retention_days > 0 {
+        let cutoff = chrono::Utc::now().timestamp_millis() as u64
+            - (retention_days as u64 * 24 * 3600 * 1000);
+        history.into_iter().filter(|e| e.timestamp >= cutoff).collect()
+    } else {
+        // retention_days == 0: 不应有任何历史记录可复制
+        return Err("历史记录已清空".into());
+    };
+    if let Some(entry) = filtered.iter().find(|e| e.id == entry_id) {
         let content = match entry.entry_type.as_str() {
             "text" => clipboard::ClipboardContent::Text(entry.content.clone()),
             "image" => {
@@ -212,6 +234,14 @@ async fn copy_from_history(
 #[tauri::command]
 async fn is_sync_enabled(state: tauri::State<'_, AppState>) -> Result<bool, String> {
     Ok(state.sync_engine.is_sync_enabled())
+}
+
+/// 在文件管理器中打开文件所在目录
+#[tauri::command]
+async fn open_file_dir(path: String) -> Result<(), String> {
+    let p = std::path::Path::new(&path);
+    let dir = if p.is_dir() { p } else { p.parent().unwrap_or(p) };
+    open::that(dir).map_err(|e| format!("打开目录失败: {}", e))
 }
 
 // ── 应用入口 ──────────────────────────
@@ -418,6 +448,8 @@ pub fn run() {
             ));
 
             // 创建同步引擎
+            let config_dir = AppConfig::config_dir();
+            let retention_days = app_config.history_retention_days;
             let sync_engine = Arc::new(SyncEngine::new(
                 device_id.clone(),
                 watcher.clone(),
@@ -425,6 +457,8 @@ pub fn run() {
                 network.clone(),
                 transfer_manager.clone(),
                 app.app_handle().clone(),
+                config_dir,
+                retention_days,
             ));
 
             // 注入应用状态
@@ -497,6 +531,7 @@ pub fn run() {
             get_android_save_dirs,
             refresh_discovery,
             cancel_transfer,
+            open_file_dir,
         ])
         .build(tauri::generate_context!())
         .expect("ShareCopy 启动失败")

@@ -4185,6 +4185,7 @@ dependencies = [
  "log",
  "mdns-sd",
  "objc2",
+ "open",
  "parking_lot",
  "serde",
  "serde_json",

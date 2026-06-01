@@ -1,3 +1,4 @@
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
@@ -92,6 +93,8 @@ pub struct SyncEngine {
     sync_enabled: Arc<AtomicBool>,
     stats: Arc<parking_lot::Mutex<SyncStats>>,
     history: Arc<parking_lot::Mutex<Vec<ClipboardHistoryEntry>>>,
+    /// 历史持久化文件路径
+    history_file: PathBuf,
     image_assemblers: Arc<parking_lot::Mutex<Vec<ImageChunkAssembler>>>,
     /// 无连接时缓存的最新剪贴板内容，设备连接后立即广播
     pending_clipboard: Arc<parking_lot::Mutex<Option<(ClipboardContent, String, std::time::Instant)>>>,
@@ -110,7 +113,31 @@ impl SyncEngine {
         network: Arc<NetworkManager>,
         transfer: Arc<FileTransferManager>,
         app_handle: AppHandle,
+        config_dir: PathBuf,
+        retention_days: u32,
     ) -> Self {
+        let history_file = config_dir.join("clipboard_history.json");
+        let mut history = Vec::new();
+
+        // 加载持久化历史
+        if retention_days > 0 {
+            if let Ok(data) = std::fs::read_to_string(&history_file) {
+                if let Ok(entries) = serde_json::from_str::<Vec<ClipboardHistoryEntry>>(&data) {
+                    let cutoff = chrono::Utc::now().timestamp_millis() as u64
+                        - (retention_days as u64 * 24 * 3600 * 1000);
+                    history = entries
+                        .into_iter()
+                        .filter(|e| e.timestamp >= cutoff)
+                        .take(MAX_HISTORY_ENTRIES)
+                        .collect();
+                    tracing::info!("加载了 {} 条剪贴板历史记录", history.len());
+                }
+            }
+        } else {
+            // retention_days == 0: 清空旧文件
+            let _ = std::fs::remove_file(&history_file);
+        }
+
         Self {
             device_id,
             watcher,
@@ -119,7 +146,8 @@ impl SyncEngine {
             transfer,
             sync_enabled: Arc::new(AtomicBool::new(true)),
             stats: Arc::new(parking_lot::Mutex::new(SyncStats::default())),
-            history: Arc::new(parking_lot::Mutex::new(Vec::new())),
+            history: Arc::new(parking_lot::Mutex::new(history)),
+            history_file,
             image_assemblers: Arc::new(parking_lot::Mutex::new(Vec::new())),
             pending_clipboard: Arc::new(parking_lot::Mutex::new(None)),
             reconnect_backoff: Arc::new(dashmap::DashMap::new()),
@@ -885,17 +913,42 @@ impl SyncEngine {
     }
 
     fn add_history_entry(&self, entry_type: &str, content: &str, from_device: &str) {
-        let mut history = self.history.lock();
-        let entry = ClipboardHistoryEntry {
-            id: uuid::Uuid::new_v4().to_string(),
-            entry_type: entry_type.to_string(),
-            content: content.to_string(),
-            from_device: from_device.to_string(),
-            timestamp: chrono::Utc::now().timestamp_millis() as u64,
+        let snapshot = {
+            let mut history = self.history.lock();
+            let entry = ClipboardHistoryEntry {
+                id: uuid::Uuid::new_v4().to_string(),
+                entry_type: entry_type.to_string(),
+                content: content.to_string(),
+                from_device: from_device.to_string(),
+                timestamp: chrono::Utc::now().timestamp_millis() as u64,
+            };
+            history.insert(0, entry);
+            if history.len() > MAX_HISTORY_ENTRIES {
+                history.truncate(MAX_HISTORY_ENTRIES);
+            }
+            history.clone() // 在锁内克隆，释放锁后再 I/O
         };
-        history.insert(0, entry);
-        if history.len() > MAX_HISTORY_ENTRIES {
-            history.truncate(MAX_HISTORY_ENTRIES);
+        // 持久化到磁盘（锁外执行，不阻塞读取）
+        self.save_history(&snapshot);
+    }
+
+    /// 将历史写入磁盘 JSON 文件
+    fn save_history(&self, history: &[ClipboardHistoryEntry]) {
+        match serde_json::to_string(history) {
+            Ok(json) => {
+                if let Some(parent) = self.history_file.parent() {
+                    if let Err(e) = std::fs::create_dir_all(parent) {
+                        tracing::error!("创建历史目录失败: {}", e);
+                        return;
+                    }
+                }
+                if let Err(e) = std::fs::write(&self.history_file, &json) {
+                    tracing::error!("写入历史文件失败: {} (path={})", e, self.history_file.display());
+                }
+            }
+            Err(e) => {
+                tracing::error!("序列化历史记录失败: {}", e);
+            }
         }
     }
 }

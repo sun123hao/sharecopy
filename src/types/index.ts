@@ -19,6 +19,7 @@ export interface AppConfig {
   auto_accept_files: boolean;
   poll_interval_active_ms: number;
   poll_interval_idle_ms: number;
+  history_retention_days: number; // 0=关闭即清, 1/3/5=保留天数
 }
 
 // ── 同步统计 ──────────────────────────
@@ -37,6 +38,8 @@ export interface TransferProgress {
   progress: number; // 0-100
   state: TransferState;
   device_id?: string; // 关联的设备 ID（发送端=目标设备，接收端=来源设备）
+  timestamp?: number; // 传输完成/失败时间戳（毫秒）
+  save_path?: string; // 接收端保存路径
 }
 
 // ── 剪贴板历史条目 ────────────────────

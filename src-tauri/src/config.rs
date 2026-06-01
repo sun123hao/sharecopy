@@ -28,6 +28,9 @@ pub struct AppConfig {
     /// 剪贴板轮询间隔（毫秒）
     pub poll_interval_active_ms: u64,
     pub poll_interval_idle_ms: u64,
+    /// 剪贴板历史保留天数（0=关闭即清，1/3/5=保留天数）
+    #[serde(default)]
+    pub history_retention_days: u32,
 }
 
 impl Default for AppConfig {
@@ -47,6 +50,7 @@ impl Default for AppConfig {
             auto_accept_files: true,
             poll_interval_active_ms: 200,
             poll_interval_idle_ms: 2000,
+            history_retention_days: 0,
         }
     }
 }
@@ -120,7 +124,7 @@ impl AppConfig {
         Self::config_dir().join("config.toml")
     }
 
-    fn config_dir() -> PathBuf {
+    pub fn config_dir() -> PathBuf {
         // Android: 使用 app 内置 files 目录，始终可读写
         #[cfg(target_os = "android")]
         {

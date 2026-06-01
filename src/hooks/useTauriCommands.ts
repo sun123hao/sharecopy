@@ -65,3 +65,8 @@ export async function refreshDiscovery(): Promise<void> {
 export async function cancelTransfer(transferId: string): Promise<void> {
   return invoke('cancel_transfer', { transferId });
 }
+
+// ── 打开文件所在目录 ─────────────────────
+export async function openFileDir(path: string): Promise<void> {
+  return invoke('open_file_dir', { path });
+}

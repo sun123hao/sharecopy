@@ -1,7 +1,8 @@
-import { CheckCircle2, XCircle, X } from 'lucide-react';
+import { CheckCircle2, XCircle, X, FolderOpen } from 'lucide-react';
 import { useAppStore } from '../store/useAppStore';
 import { useTransferProgress } from '../hooks/useTauriEvents';
-import { cancelTransfer } from '../hooks/useTauriCommands';
+import { cancelTransfer, openFileDir } from '../hooks/useTauriCommands';
+import { formatTime } from '../utils/time';
 
 export function TransferProgressPanel({ deviceId }: { deviceId?: string }) {
   const allTransfers = useAppStore((s) => s.transfers);
@@ -20,6 +21,8 @@ export function TransferProgressPanel({ deviceId }: { deviceId?: string }) {
       progress: Math.round(p.progress * 100),
       state: p.state as 'pending' | 'transferring' | 'completed' | 'failed',
       device_id: (p as any).device_id,
+      timestamp: (p as any).timestamp ?? Date.now(),
+      save_path: (p as any).save_path,
     });
   });
 
@@ -30,9 +33,18 @@ export function TransferProgressPanel({ deviceId }: { deviceId?: string }) {
     try { await cancelTransfer(transferId); } catch (e) { console.error('取消传输失败:', e); }
   };
 
+  const handleDismiss = (transferId: string) => {
+    removeTransfer(transferId);
+  };
+
+  const handleOpenDir = async (savePath?: string) => {
+    if (!savePath) return;
+    try { await openFileDir(savePath); } catch (e) { console.error('打开目录失败:', e); }
+  };
+
   return (
-    <div className="glass-thick border-t border-ios-separator dark:border-ios-separator-dark px-4 py-3 space-y-[7px] transition-colors flex-shrink-0">
-      <p className="text-[11px] font-medium text-black/40 dark:text-white/40 uppercase tracking-[0.02em]">
+    <div className={`border-t border-ios-separator dark:border-ios-separator-dark px-4 py-3 transition-colors ${deviceId ? 'flex-1 min-h-0 flex flex-col bg-ios-card dark:bg-ios-card-dark' : 'glass-thick flex-shrink-0 space-y-[7px]'}`}>
+      <p className="text-[11px] font-medium text-black/40 dark:text-white/40 uppercase tracking-[0.02em] mb-[7px] flex-shrink-0">
         {deviceId ? '传输记录' : '传输进度'}
       </p>
 
@@ -41,7 +53,7 @@ export function TransferProgressPanel({ deviceId }: { deviceId?: string }) {
           暂无传输记录
         </p>
       ) : (
-        <div className="space-y-[7px] max-h-64 overflow-y-auto">
+        <div className={`space-y-[7px] overflow-y-auto ${deviceId ? 'flex-1 min-h-0' : 'max-h-64'}`}>
           {displayed.map((t) => (
             <div
               key={t.transfer_id}
@@ -57,8 +69,13 @@ export function TransferProgressPanel({ deviceId }: { deviceId?: string }) {
                 </div>
               )}
               <div className="flex-1 min-w-0">
-                <p className="text-[13px] truncate mb-1.5">{t.file_name}</p>
-                <div className="h-1 rounded-full bg-black/10 dark:bg-white/10 overflow-hidden">
+                <p className="text-[13px] truncate">{t.file_name}</p>
+                {(t as any).timestamp && (
+                  <p className="text-[10px] text-black/30 dark:text-white/30 mt-0.5">
+                    {formatTime((t as any).timestamp)}
+                  </p>
+                )}
+                <div className="h-1 rounded-full bg-black/10 dark:bg-white/10 overflow-hidden mt-1.5">
                   <div
                     className={`h-full rounded-full transition-all duration-400 ${
                       t.state === 'failed' ? 'bg-ios-red' : t.state === 'completed' ? 'bg-ios-green' : 'bg-accent'
@@ -76,11 +93,28 @@ export function TransferProgressPanel({ deviceId }: { deviceId?: string }) {
               >
                 {t.state === 'completed' ? '完成' : t.state === 'failed' ? '失败' : `${t.progress}%`}
               </span>
-              {(t.state === 'transferring' || t.state === 'pending') && (
+              {(t.state === 'completed' || t.state === 'failed') && (t as any).save_path && (
+                <button
+                  onClick={() => handleOpenDir((t as any).save_path)}
+                  className="w-6 h-6 rounded-full flex items-center justify-center text-black/20 dark:text-white/20 hover:bg-accent/10 hover:text-accent transition-all duration-200 flex-shrink-0"
+                  title="打开文件目录"
+                >
+                  <FolderOpen className="w-3.5 h-3.5" />
+                </button>
+              )}
+              {(t.state === 'transferring' || t.state === 'pending') ? (
                 <button
                   onClick={() => handleCancel(t.transfer_id)}
                   className="w-6 h-6 rounded-full flex items-center justify-center text-black/20 dark:text-white/20 hover:bg-ios-red/10 hover:text-ios-red transition-all duration-200 flex-shrink-0"
                   title="取消传输"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              ) : (
+                <button
+                  onClick={() => handleDismiss(t.transfer_id)}
+                  className="w-6 h-6 rounded-full flex items-center justify-center text-black/15 dark:text-white/15 hover:bg-black/5 dark:hover:bg-white/5 hover:text-black/40 dark:hover:text-white/40 transition-all duration-200 flex-shrink-0"
+                  title="移除记录"
                 >
                   <X className="w-3.5 h-3.5" />
                 </button>

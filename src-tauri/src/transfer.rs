@@ -28,6 +28,8 @@ pub struct TransferProgress {
     /// 关联的设备 ID（发送端为目标设备，接收端为来源设备）
     #[serde(skip_serializing_if = "Option::is_none")]
     pub device_id: Option<String>,
+    /// 传输事件时间戳（Unix 毫秒）
+    pub timestamp: u64,
 }
 
 impl TransferProgress {
@@ -43,6 +45,7 @@ impl TransferProgress {
             error: None,
             save_path: None,
             device_id: None,
+            timestamp: chrono::Utc::now().timestamp_millis() as u64,
         }
     }
 }
@@ -225,6 +228,7 @@ impl FileTransferManager {
                         error: Some(format!("发送失败: {}", e)),
                         save_path: None,
                         device_id: Some(target_id_owned.clone()),
+                        timestamp: chrono::Utc::now().timestamp_millis() as u64,
                     });
                     cancel_tokens.remove(&tid_for_cancel);
                     return;
@@ -245,6 +249,7 @@ impl FileTransferManager {
                     error: None,
                     save_path: None,
                     device_id: Some(target_id_owned.clone()),
+                        timestamp: chrono::Utc::now().timestamp_millis() as u64,
                 });
             }
             // file_data 在此 drop，释放内存
@@ -281,6 +286,7 @@ impl FileTransferManager {
             error: None,
             save_path: None,
             device_id: Some(source_device_id.to_string()),
+                timestamp: chrono::Utc::now().timestamp_millis() as u64,
         });
     }
 
@@ -303,6 +309,7 @@ impl FileTransferManager {
                 error: Some("传输已取消".into()),
                 save_path: None,
                 device_id: Some(removed.source_device_id),
+                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
             });
         }
 
@@ -322,6 +329,7 @@ impl FileTransferManager {
                 error: Some("发送方取消了传输".into()),
                 save_path: None,
                 device_id: Some(removed.source_device_id),
+                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
             });
         }
     }
@@ -364,9 +372,8 @@ impl FileTransferManager {
             error: None,
             save_path: None,
             device_id: Some(src_id),
+            timestamp: chrono::Utc::now().timestamp_millis() as u64,
         });
-
-        // 检查是否集齐所有块
         if transfer.chunks.len() == transfer.total_chunks as usize {
             let transfer = incoming.remove(&payload.transfer_id).unwrap();
             let src_device_id = transfer.source_device_id.clone();
@@ -400,6 +407,7 @@ impl FileTransferManager {
                         error: Some("文件校验失败".into()),
                         save_path: None,
                         device_id: Some(src_device_id.clone()),
+                        timestamp: chrono::Utc::now().timestamp_millis() as u64,
                     });
                     return;
                 }
@@ -417,6 +425,7 @@ impl FileTransferManager {
                         error: Some(format!("保存失败: {}", e)),
                         save_path: None,
                         device_id: Some(src_device_id.clone()),
+                        timestamp: chrono::Utc::now().timestamp_millis() as u64,
                     });
                     return;
                 }
@@ -431,6 +440,7 @@ impl FileTransferManager {
                     error: None,
                     save_path: Some(save_path.to_string_lossy().to_string()),
                     device_id: Some(src_device_id),
+                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
                 });
             });
         }
