@@ -13,6 +13,8 @@ interface AppState {
   stats: SyncStats;
   // 传输进度列表
   transfers: TransferProgress[];
+  // 全局面板已 dismiss 的传输 ID（不影响设备详情页）
+  dismissedIds: string[];
   // 当前选中的设备 ID（用于设备详情页）
   selectedDeviceId: string | null;
 
@@ -27,6 +29,7 @@ interface AppState {
   removeDevice: (deviceId: string) => void;
   updateTransferProgress: (p: TransferProgress) => void;
   removeTransfer: (transferId: string) => void;
+  dismissTransfer: (transferId: string) => void;
   selectDevice: (deviceId: string | null) => void;
   refreshStats: () => Promise<void>;
 }
@@ -37,6 +40,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   syncEnabled: true,
   stats: { texts_synced: 0, images_synced: 0, files_transferred: 0 },
   transfers: [],
+  dismissedIds: [],
   selectedDeviceId: null,
 
   loadConfig: async () => {
@@ -144,6 +148,13 @@ export const useAppStore = create<AppState>((set, get) => ({
   removeTransfer: (transferId: string) => {
     set((state) => ({
       transfers: state.transfers.filter((t) => t.transfer_id !== transferId),
+      dismissedIds: state.dismissedIds.filter((id) => id !== transferId),
+    }));
+  },
+
+  dismissTransfer: (transferId: string) => {
+    set((state) => ({
+      dismissedIds: [...state.dismissedIds, transferId],
     }));
   },
 

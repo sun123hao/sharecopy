@@ -6,13 +6,18 @@ import { formatTime } from '../utils/time';
 
 export function TransferProgressPanel({ deviceId }: { deviceId?: string }) {
   const allTransfers = useAppStore((s) => s.transfers);
+  const dismissedIds = useAppStore((s) => s.dismissedIds);
   const updateTransferProgress = useAppStore((s) => s.updateTransferProgress);
   const removeTransfer = useAppStore((s) => s.removeTransfer);
+  const dismissTransfer = useAppStore((s) => s.dismissTransfer);
 
   const transfers = deviceId
     ? allTransfers.filter((t) => t.device_id === deviceId)
     : allTransfers;
-  const displayed = deviceId ? transfers : transfers.slice(-1);
+  const dismissedSet = new Set(dismissedIds);
+  // 全局面板：过滤掉已 dismiss 的记录；设备详情页：显示全部
+  const visible = deviceId ? transfers : transfers.filter((t) => !dismissedSet.has(t.transfer_id));
+  const displayed = deviceId ? visible : visible.slice(-1);
 
   useTransferProgress((p) => {
     updateTransferProgress({
@@ -26,7 +31,7 @@ export function TransferProgressPanel({ deviceId }: { deviceId?: string }) {
     });
   });
 
-  if (!deviceId && transfers.length === 0) return null;
+  if (!deviceId && visible.length === 0) return null;
 
   const handleCancel = async (transferId: string) => {
     removeTransfer(transferId);
@@ -34,7 +39,12 @@ export function TransferProgressPanel({ deviceId }: { deviceId?: string }) {
   };
 
   const handleDismiss = (transferId: string) => {
-    removeTransfer(transferId);
+    // 全局面板：仅隐藏不删除；设备详情页：真正移除
+    if (deviceId) {
+      removeTransfer(transferId);
+    } else {
+      dismissTransfer(transferId);
+    }
   };
 
   const handleOpenDir = async (savePath?: string) => {
@@ -43,7 +53,7 @@ export function TransferProgressPanel({ deviceId }: { deviceId?: string }) {
   };
 
   return (
-    <div className={`border-t border-ios-separator dark:border-ios-separator-dark px-4 py-3 transition-colors ${deviceId ? 'flex-1 min-h-0 flex flex-col bg-ios-card dark:bg-ios-card-dark' : 'glass-thick flex-shrink-0 space-y-[7px]'}`}>
+    <div className={`border-t border-ios-separator dark:border-ios-separator-dark px-4 py-3 transition-colors ${deviceId ? 'flex-1 min-h-0 flex flex-col' : 'glass-thick flex-shrink-0 space-y-[7px]'}`}>
       <p className="text-[11px] font-medium text-black/40 dark:text-white/40 uppercase tracking-[0.02em] mb-[7px] flex-shrink-0">
         {deviceId ? '传输记录' : '传输进度'}
       </p>
