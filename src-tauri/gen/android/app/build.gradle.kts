@@ -55,7 +55,10 @@ android {
             }
         }
         getByName("release") {
-            signingConfig = signingConfigs.getByName("release")
+            // 仅在 keystore 存在时启用签名（CI 通过密钥，本地无签名调试亦可构建）
+            if (keystorePropsFile.exists()) {
+                signingConfig = signingConfigs.getByName("release")
+            }
             isMinifyEnabled = true
             isShrinkResources = true // 移除未使用资源
             proguardFiles(

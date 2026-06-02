@@ -126,9 +126,9 @@ jobs:
 
       - name: 恢复签名密钥
         run: |
-          mkdir -p src-tauri/gen/android/keystore
-          echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > src-tauri/gen/android/keystore/release.keystore
-          cat > src-tauri/gen/android/keystore/keystore.properties << 'PROPEOF'
+          mkdir -p src-tauri/gen/android/app/keystore
+          echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > src-tauri/gen/android/app/keystore/release.keystore
+          cat > src-tauri/gen/android/app/keystore/keystore.properties << 'PROPEOF'
           keyAlias=${{ secrets.ANDROID_KEY_ALIAS }}
           keyPassword=${{ secrets.ANDROID_KEY_PASSWORD }}
           storeFile=release.keystore
@@ -181,9 +181,9 @@ jobs:
 
       - name: 恢复签名密钥
         run: |
-          mkdir -p src-tauri/gen/android/keystore
-          echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > src-tauri/gen/android/keystore/release.keystore
-          cat > src-tauri/gen/android/keystore/keystore.properties << 'PROPEOF'
+          mkdir -p src-tauri/gen/android/app/keystore
+          echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > src-tauri/gen/android/app/keystore/release.keystore
+          cat > src-tauri/gen/android/app/keystore/keystore.properties << 'PROPEOF'
           keyAlias=${{ secrets.ANDROID_KEY_ALIAS }}
           keyPassword=${{ secrets.ANDROID_KEY_PASSWORD }}
           storeFile=release.keystore
