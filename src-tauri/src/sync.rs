@@ -444,8 +444,9 @@ impl SyncEngine {
                 if let Err(e) = self.app_handle.emit("device-offline", &device_id) {
                     tracing::error!("发送 device-offline 事件失败: {}", e);
                 }
-                // 立即发送 mDNS 查询，加速重新发现 + 尝试重连
+                // 从 mDNS 发现缓存中移除 + 立即发送 mDNS 查询加速重连
                 if let Ok(mut discovery) = self.discovery.lock() {
+                    discovery.discovered_devices_map().remove(&device_id);
                     if let Err(e) = discovery.rebrowse() {
                         tracing::debug!("断开后 rebrowse 失败: {}", e);
                     }

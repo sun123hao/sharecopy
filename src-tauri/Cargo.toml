@@ -1,6 +1,6 @@
 [package]
 name = "sharecopy"
-version = "0.1.0"
+version = "0.4.0"
 description = "Cross-platform LAN clipboard sharing tool"
 authors = ["mao"]
 license = "MIT"
