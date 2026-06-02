@@ -34,3 +34,4 @@ docs/
 *.sln
 *.sw?
 *.keystore
+keystore.properties

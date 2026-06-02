@@ -28,6 +28,20 @@ android {
             abiFilters += listOf("arm64-v8a")
         }
     }
+    // 签名配置（CI 通过环境变量，本地通过 keystore.properties）
+    val keystorePropsFile = file("keystore/keystore.properties")
+    if (keystorePropsFile.exists()) {
+        val props = Properties().apply { keystorePropsFile.inputStream().use { load(it) } }
+        signingConfigs {
+            create("release") {
+                keyAlias = props.getProperty("keyAlias")
+                keyPassword = props.getProperty("keyPassword")
+                storeFile = file(props.getProperty("storeFile")!!)
+                storePassword = props.getProperty("storePassword")
+            }
+        }
+    }
+
     buildTypes {
         getByName("debug") {
             manifestPlaceholders["usesCleartextTraffic"] = "true"
@@ -41,6 +55,7 @@ android {
             }
         }
         getByName("release") {
+            signingConfig = signingConfigs.getByName("release")
             isMinifyEnabled = true
             isShrinkResources = true // 移除未使用资源
             proguardFiles(
