@@ -36,7 +36,7 @@ android {
             create("release") {
                 keyAlias = props.getProperty("keyAlias")
                 keyPassword = props.getProperty("keyPassword")
-                storeFile = file(props.getProperty("storeFile")!!)
+                storeFile = file(props.getProperty("storeFile") ?: throw GradleException("keystore.properties 中缺少 storeFile 属性"))
                 storePassword = props.getProperty("storePassword")
             }
         }

@@ -131,7 +131,7 @@ jobs:
           cat > src-tauri/gen/android/app/keystore/keystore.properties << 'PROPEOF'
           keyAlias=${{ secrets.ANDROID_KEY_ALIAS }}
           keyPassword=${{ secrets.ANDROID_KEY_PASSWORD }}
-          storeFile=release.keystore
+          storeFile=keystore/release.keystore
           storePassword=${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           PROPEOF
 
@@ -186,7 +186,7 @@ jobs:
           cat > src-tauri/gen/android/app/keystore/keystore.properties << 'PROPEOF'
           keyAlias=${{ secrets.ANDROID_KEY_ALIAS }}
           keyPassword=${{ secrets.ANDROID_KEY_PASSWORD }}
-          storeFile=release.keystore
+          storeFile=keystore/release.keystore
           storePassword=${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           PROPEOF
 
